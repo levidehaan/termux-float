@@ -21,6 +21,7 @@ import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.settings.preferences.TermuxFloatAppSharedPreferences;
 import com.termux.shared.view.KeyboardUtils;
+import com.termux.shared.view.ViewUtils;
 import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
@@ -32,6 +33,10 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
     public static final float ALPHA_FOCUS = 0.9f;
     public static final float ALPHA_NOT_FOCUS = 0.7f;
     public static final float ALPHA_MOVING = 0.5f;
+
+    // Left edge swipe detection zone width in dp
+    private static final int LEFT_EDGE_ZONE_DP = 40;
+    private static final int SWIPE_THRESHOLD_DP = 80;
 
     private int DISPLAY_WIDTH, DISPLAY_HEIGHT;
 
@@ -46,6 +51,13 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
     private EdgeSwipeDetector mEdgeSwipeDetector;
     private boolean mUseSidePanelMode = false;
     private EdgePanelManager mEdgePanelManager;
+
+    // Swipe tracking for close gesture
+    private boolean mTrackingLeftEdgeSwipe = false;
+    private float mSwipeStartX;
+    private float mSwipeStartY;
+    private int mLeftEdgeZonePx;
+    private int mSwipeThresholdPx;
 
     /**
      *  The {@link TerminalViewClient} interface implementation to allow for communication between
@@ -157,6 +169,11 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
             // New side panel mode
             mUseSidePanelMode = true;
             mEdgeSwipeDetector = new EdgeSwipeDetector(getContext(), this);
+
+            // Initialize swipe detection thresholds in pixels
+            float density = getContext().getResources().getDisplayMetrics().density;
+            mLeftEdgeZonePx = (int) (LEFT_EDGE_ZONE_DP * density);
+            mSwipeThresholdPx = (int) (SWIPE_THRESHOLD_DP * density);
         }
     }
 
@@ -269,12 +286,39 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
 
     /**
      * Intercept touch events to obtain and loose focus on touch events.
+     * In side panel mode, intercepts touches in left edge zone for swipe-to-close gesture.
      */
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
-        // In side panel mode, let edge swipe detector handle touch events
-        if (mUseSidePanelMode && mEdgeSwipeDetector != null) {
-            mEdgeSwipeDetector.onTouch(this, event);
+        // In side panel mode, check for left edge swipe to close
+        if (mUseSidePanelMode && mEdgePanelManager != null) {
+            float touchX = event.getX();
+
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    // Check if touch started in left edge zone
+                    if (touchX <= mLeftEdgeZonePx) {
+                        mTrackingLeftEdgeSwipe = true;
+                        mSwipeStartX = event.getRawX();
+                        mSwipeStartY = event.getRawY();
+                        Logger.logDebug(LOG_TAG, "Left edge touch detected at x=" + touchX);
+                        // Intercept to prevent keyboard from opening
+                        return true;
+                    }
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (mTrackingLeftEdgeSwipe) {
+                        return true; // Continue intercepting
+                    }
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (mTrackingLeftEdgeSwipe) {
+                        mTrackingLeftEdgeSwipe = false;
+                        return true;
+                    }
+                    break;
+            }
         }
 
         if (isInLongPressState) return true;
@@ -345,6 +389,37 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        // Handle left edge swipe gesture for closing panel
+        if (mTrackingLeftEdgeSwipe && mUseSidePanelMode && mEdgePanelManager != null) {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_MOVE:
+                    float deltaX = event.getRawX() - mSwipeStartX;
+                    float deltaY = Math.abs(event.getRawY() - mSwipeStartY);
+
+                    // Check if this is a horizontal swipe (not vertical)
+                    if (deltaX > mSwipeThresholdPx && deltaX > deltaY * 2) {
+                        Logger.logDebug(LOG_TAG, "Swipe-to-close detected, deltaX=" + deltaX);
+                        mTrackingLeftEdgeSwipe = false;
+                        mEdgePanelManager.collapse();
+                        return true;
+                    }
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    // Swipe didn't reach threshold - treat as tap
+                    float swipeDistance = event.getRawX() - mSwipeStartX;
+                    if (swipeDistance < mSwipeThresholdPx / 4) {
+                        // This was just a tap, not a swipe - show keyboard
+                        Logger.logDebug(LOG_TAG, "Left edge tap detected, showing keyboard");
+                        changeFocus(true);
+                        showTouchKeyboard();
+                    }
+                    mTrackingLeftEdgeSwipe = false;
+                    return true;
+            }
+            return true;
+        }
+
         if (isInLongPressState) {
             mScaleDetector.onTouchEvent(event);
             if (mScaleDetector.isInProgress()) return true;
