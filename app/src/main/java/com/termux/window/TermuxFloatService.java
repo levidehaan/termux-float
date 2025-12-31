@@ -63,6 +63,9 @@ public class TermuxFloatService extends Service implements
 
         // Register for memory callbacks
         getApplicationContext().registerComponentCallbacks(null);
+
+        // Install CLI scripts (droid, llama) to Termux bin directory
+        ScriptInstaller.installScripts(this);
     }
 
     @Override

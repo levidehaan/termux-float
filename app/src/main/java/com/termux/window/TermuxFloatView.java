@@ -181,6 +181,12 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
                 swipeMargin.setTerminalView(mTerminalView);
                 // EdgePanelManager will be set later via setEdgePanelManager()
             }
+
+            // Set up extra keys view
+            ExtraKeysView extraKeys = findViewById(R.id.extra_keys);
+            if (extraKeys != null) {
+                extraKeys.setTerminalView(mTerminalView);
+            }
         }
     }
 
