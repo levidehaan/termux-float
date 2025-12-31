@@ -179,8 +179,7 @@ public class EdgePanelManager {
             mStateListener.onPanelExpanding();
         }
 
-        // Hide edge indicator
-        hideEdgeIndicator();
+        // Keep edge indicator visible - it will be used to close too
 
         // Make the main view visible
         mTermuxFloatView.setVisibility(View.VISIBLE);
@@ -271,8 +270,9 @@ public class EdgePanelManager {
             public void onAnimationEnd(Animator animation) {
                 mIsExpanded = false;
                 mIsAnimating = false;
-                // Hide main view and show edge indicator
+                // Hide main view (edge indicator stays visible)
                 mTermuxFloatView.setVisibility(View.GONE);
+                // Ensure edge indicator is shown (in case it wasn't already)
                 showEdgeIndicator();
                 if (mStateListener != null) {
                     mStateListener.onPanelCollapsed();
@@ -382,6 +382,7 @@ public class EdgePanelManager {
 
     /**
      * Touch listener for the edge indicator.
+     * Swipe left to toggle panel state (open when closed, close when open).
      */
     private class EdgeIndicatorTouchListener implements View.OnTouchListener {
         private float mStartX;
@@ -410,14 +411,21 @@ public class EdgePanelManager {
                     float totalDeltaX = endX - mStartX;
                     float velocityX = duration > 0 ? (totalDeltaX / duration) * 1000 : 0;
 
-                    // Check for tap (quick touch with minimal movement)
+                    // Check for tap (quick touch with minimal movement) - toggle panel
                     if (duration < 300 && Math.abs(totalDeltaX) < mSwipeThresholdPx / 2) {
-                        expand();
+                        Logger.logDebug(LOG_TAG, "Edge indicator tapped, toggling panel");
+                        toggle();
                         return true;
                     }
 
-                    // Check for swipe
-                    return handleEdgeSwipe(totalDeltaX, velocityX);
+                    // Check for swipe left - toggle panel
+                    if (totalDeltaX < -mSwipeThresholdPx / 2 || velocityX < -SWIPE_VELOCITY_THRESHOLD) {
+                        Logger.logDebug(LOG_TAG, "Edge indicator swiped left, toggling panel");
+                        toggle();
+                        return true;
+                    }
+
+                    return false;
 
                 case MotionEvent.ACTION_CANCEL:
                     return true;
