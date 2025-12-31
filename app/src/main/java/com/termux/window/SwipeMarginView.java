@@ -4,7 +4,10 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.AttributeSet;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
@@ -22,6 +25,7 @@ import com.termux.view.TerminalView;
  * Features:
  * - Swipe right to close the panel (detected by finger exiting view or velocity)
  * - Vertical scroll to fast-scroll the terminal
+ * - Long press to toggle transparent mode (same as terminal long press)
  * - Visual feedback when touched
  */
 public class SwipeMarginView extends View {
@@ -30,21 +34,30 @@ public class SwipeMarginView extends View {
     // Velocity threshold for swipe detection (pixels per second)
     private static final int SWIPE_VELOCITY_THRESHOLD = 500;
 
+    // Long press timeout
+    private static final int LONG_PRESS_TIMEOUT = ViewConfiguration.getLongPressTimeout();
+
     // Touch tracking
     private float mStartX;
     private float mStartY;
     private float mLastY;
     private boolean mIsSwipeGesture = false;
     private boolean mIsScrollGesture = false;
+    private boolean mIsLongPressed = false;
 
     // Velocity tracking
     private VelocityTracker mVelocityTracker;
+
+    // Long press handling
+    private Handler mHandler = new Handler(Looper.getMainLooper());
+    private Runnable mLongPressRunnable;
 
     // Pixel values
     private int mTouchSlop;
 
     // Visual feedback
     private Paint mHighlightPaint;
+    private Paint mLongPressPaint;
     private Paint mIndicatorPaint;
     private Paint mArrowPaint;
     private boolean mIsTouched = false;
@@ -52,6 +65,7 @@ public class SwipeMarginView extends View {
     // References
     private EdgePanelManager mEdgePanelManager;
     private TerminalView mTerminalView;
+    private TermuxFloatView mTermuxFloatView;
 
     public SwipeMarginView(Context context) {
         super(context);
@@ -76,6 +90,11 @@ public class SwipeMarginView extends View {
         mHighlightPaint.setColor(0x30ffffff); // Semi-transparent white
         mHighlightPaint.setStyle(Paint.Style.FILL);
 
+        // Long press paint (slightly brighter/different color)
+        mLongPressPaint = new Paint();
+        mLongPressPaint.setColor(0x4003dac6); // Semi-transparent teal
+        mLongPressPaint.setStyle(Paint.Style.FILL);
+
         // Indicator paint for subtle visual cue
         mIndicatorPaint = new Paint();
         mIndicatorPaint.setColor(0x40ffffff);
@@ -91,6 +110,7 @@ public class SwipeMarginView extends View {
         // Make view clickable to receive touch events
         setClickable(true);
         setFocusable(false);
+        setLongClickable(true);
     }
 
     /**
@@ -105,6 +125,13 @@ public class SwipeMarginView extends View {
      */
     public void setTerminalView(TerminalView terminalView) {
         mTerminalView = terminalView;
+    }
+
+    /**
+     * Set the TermuxFloatView for long press mode.
+     */
+    public void setTermuxFloatView(TermuxFloatView floatView) {
+        mTermuxFloatView = floatView;
     }
 
     /**
@@ -126,6 +153,22 @@ public class SwipeMarginView extends View {
         super.onAttachedToWindow();
         // Apply width from settings when attached
         updateWidth();
+
+        // Find parent TermuxFloatView if not set
+        if (mTermuxFloatView == null) {
+            View parent = (View) getParent();
+            while (parent != null) {
+                if (parent instanceof TermuxFloatView) {
+                    mTermuxFloatView = (TermuxFloatView) parent;
+                    break;
+                }
+                if (parent.getParent() instanceof View) {
+                    parent = (View) parent.getParent();
+                } else {
+                    break;
+                }
+            }
+        }
     }
 
     @Override
@@ -134,6 +177,15 @@ public class SwipeMarginView extends View {
 
         int width = getWidth();
         int height = getHeight();
+
+        // Draw long press highlight if in that mode
+        if (mIsLongPressed) {
+            canvas.drawRect(0, 0, width, height, mLongPressPaint);
+        }
+        // Draw touch highlight
+        else if (mIsTouched) {
+            canvas.drawRect(0, 0, width, height, mHighlightPaint);
+        }
 
         // Draw subtle vertical line indicator on right edge
         float indicatorWidth = 2f;
@@ -153,11 +205,6 @@ public class SwipeMarginView extends View {
         float arrowX = width * 0.3f;
         canvas.drawCircle(arrowX, centerY, arrowSize / 3, mArrowPaint);
         canvas.drawCircle(arrowX + arrowSize / 2, centerY, arrowSize / 4, mArrowPaint);
-
-        // Draw highlight when touched
-        if (mIsTouched) {
-            canvas.drawRect(0, 0, width, height, mHighlightPaint);
-        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -176,8 +223,21 @@ public class SwipeMarginView extends View {
                 mLastY = mStartY;
                 mIsSwipeGesture = false;
                 mIsScrollGesture = false;
+                mIsLongPressed = false;
                 mIsTouched = true;
                 invalidate();
+
+                // Schedule long press
+                mLongPressRunnable = () -> {
+                    if (mIsTouched && !mIsSwipeGesture && !mIsScrollGesture) {
+                        mIsLongPressed = true;
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                        toggleLongPressMode();
+                        invalidate();
+                    }
+                };
+                mHandler.postDelayed(mLongPressRunnable, LONG_PRESS_TIMEOUT);
+
                 Logger.logDebug(LOG_TAG, "Touch down in swipe margin at x=" + event.getX());
                 return true;
 
@@ -187,6 +247,16 @@ public class SwipeMarginView extends View {
                 float moveY = event.getRawY() - mLastY;
                 mLastY = event.getRawY();
                 float localX = event.getX();
+
+                // Cancel long press if moved too much
+                if (Math.abs(deltaX) > mTouchSlop || Math.abs(deltaY) > mTouchSlop) {
+                    cancelLongPress();
+                }
+
+                // If long pressed, don't handle swipe/scroll
+                if (mIsLongPressed) {
+                    return true;
+                }
 
                 // Determine gesture type if not yet decided
                 if (!mIsSwipeGesture && !mIsScrollGesture) {
@@ -234,7 +304,21 @@ public class SwipeMarginView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                cancelLongPress();
                 float finalDeltaX = event.getRawX() - mStartX;
+
+                // If long pressed, handle release
+                if (mIsLongPressed) {
+                    mIsLongPressed = false;
+                    mIsTouched = false;
+                    invalidate();
+                    // Turn off long press mode
+                    if (mTermuxFloatView != null) {
+                        mTermuxFloatView.updateLongPressMode(false);
+                    }
+                    cleanupVelocityTracker();
+                    return true;
+                }
 
                 // Check for swipe on release - if moved right significantly
                 if (mIsSwipeGesture && finalDeltaX > getWidth() * 0.5f) {
@@ -245,11 +329,13 @@ public class SwipeMarginView extends View {
 
                 // Fall through to cleanup
             case MotionEvent.ACTION_CANCEL:
+                cancelLongPress();
                 mIsTouched = false;
+                mIsLongPressed = false;
                 invalidate();
 
                 // If it was just a tap (no gesture detected), show keyboard
-                if (!mIsSwipeGesture && !mIsScrollGesture) {
+                if (!mIsSwipeGesture && !mIsScrollGesture && event.getAction() == MotionEvent.ACTION_UP) {
                     float tapDeltaX = Math.abs(event.getRawX() - mStartX);
                     float tapDeltaY = Math.abs(event.getRawY() - mStartY);
                     if (tapDeltaX < mTouchSlop && tapDeltaY < mTouchSlop) {
@@ -262,30 +348,46 @@ public class SwipeMarginView extends View {
 
                 mIsSwipeGesture = false;
                 mIsScrollGesture = false;
-
-                // Recycle velocity tracker
-                if (mVelocityTracker != null) {
-                    mVelocityTracker.recycle();
-                    mVelocityTracker = null;
-                }
+                cleanupVelocityTracker();
                 return true;
         }
         return super.onTouchEvent(event);
     }
 
+    private void cancelLongPress() {
+        if (mLongPressRunnable != null) {
+            mHandler.removeCallbacks(mLongPressRunnable);
+            mLongPressRunnable = null;
+        }
+    }
+
+    private void toggleLongPressMode() {
+        if (mTermuxFloatView != null) {
+            // Toggle the long press mode
+            boolean currentState = mTermuxFloatView.isInLongPressState;
+            mTermuxFloatView.updateLongPressMode(!currentState);
+            Logger.logDebug(LOG_TAG, "Toggled long press mode to: " + !currentState);
+        }
+    }
+
     private void triggerCollapse() {
+        cancelLongPress();
         mIsTouched = false;
+        mIsLongPressed = false;
         invalidate();
         mIsSwipeGesture = false;
         mIsScrollGesture = false;
-
-        if (mVelocityTracker != null) {
-            mVelocityTracker.recycle();
-            mVelocityTracker = null;
-        }
+        cleanupVelocityTracker();
 
         if (mEdgePanelManager != null) {
             mEdgePanelManager.collapse();
+        }
+    }
+
+    private void cleanupVelocityTracker() {
+        if (mVelocityTracker != null) {
+            mVelocityTracker.recycle();
+            mVelocityTracker = null;
         }
     }
 }
