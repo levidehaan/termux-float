@@ -250,7 +250,7 @@ public class SwipeMarginView extends View {
 
                 // Cancel long press if moved too much
                 if (Math.abs(deltaX) > mTouchSlop || Math.abs(deltaY) > mTouchSlop) {
-                    cancelLongPress();
+                    cancelLongPressDetection();
                 }
 
                 // If long pressed, don't handle swipe/scroll
@@ -304,7 +304,7 @@ public class SwipeMarginView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
-                cancelLongPress();
+                cancelLongPressDetection();
                 float finalDeltaX = event.getRawX() - mStartX;
 
                 // If long pressed, handle release
@@ -329,7 +329,7 @@ public class SwipeMarginView extends View {
 
                 // Fall through to cleanup
             case MotionEvent.ACTION_CANCEL:
-                cancelLongPress();
+                cancelLongPressDetection();
                 mIsTouched = false;
                 mIsLongPressed = false;
                 invalidate();
@@ -354,7 +354,7 @@ public class SwipeMarginView extends View {
         return super.onTouchEvent(event);
     }
 
-    private void cancelLongPress() {
+    private void cancelLongPressDetection() {
         if (mLongPressRunnable != null) {
             mHandler.removeCallbacks(mLongPressRunnable);
             mLongPressRunnable = null;
@@ -371,7 +371,7 @@ public class SwipeMarginView extends View {
     }
 
     private void triggerCollapse() {
-        cancelLongPress();
+        cancelLongPressDetection();
         mIsTouched = false;
         mIsLongPressed = false;
         invalidate();
