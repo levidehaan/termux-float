@@ -262,6 +262,11 @@ public class TermuxFloatService extends Service implements
             }
 
             @Override
+            public void onSettingsClicked() {
+                openSettings();
+            }
+
+            @Override
             public void onCollapseClicked() {
                 collapsePanel();
             }
@@ -522,6 +527,15 @@ public class TermuxFloatService extends Service implements
         if (mEdgePanelManager != null) {
             mEdgePanelManager.collapse();
         }
+    }
+
+    /**
+     * Open the settings activity.
+     */
+    private void openSettings() {
+        Intent intent = new Intent(this, TermuxFloatSettingsActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
     }
 
     /**
