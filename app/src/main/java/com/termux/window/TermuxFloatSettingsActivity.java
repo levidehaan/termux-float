@@ -1,5 +1,7 @@
 package com.termux.window;
 
+import android.app.Activity;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -11,14 +13,12 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
-
 import com.termux.shared.view.ViewUtils;
 
 /**
  * Settings activity for Termux Float customization.
  */
-public class TermuxFloatSettingsActivity extends AppCompatActivity {
+public class TermuxFloatSettingsActivity extends Activity {
     private static final String PREFS_NAME = "termux_float_settings";
 
     // Preference keys
@@ -261,24 +261,24 @@ public class TermuxFloatSettingsActivity extends AppCompatActivity {
     /**
      * Get the swipe margin width from preferences.
      */
-    public static int getSwipeMarginWidth(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static int getSwipeMarginWidth(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getInt(KEY_SWIPE_MARGIN_WIDTH, DEFAULT_SWIPE_MARGIN_WIDTH);
     }
 
     /**
      * Check if fast scroll is enabled.
      */
-    public static boolean isFastScrollEnabled(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static boolean isFastScrollEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getBoolean(KEY_FAST_SCROLL_ENABLED, DEFAULT_FAST_SCROLL_ENABLED);
     }
 
     /**
      * Get the fast scroll multiplier.
      */
-    public static int getFastScrollMultiplier(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static int getFastScrollMultiplier(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getInt(KEY_FAST_SCROLL_MULTIPLIER, DEFAULT_FAST_SCROLL_MULTIPLIER);
     }
 }
