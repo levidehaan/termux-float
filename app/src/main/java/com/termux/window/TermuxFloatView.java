@@ -174,6 +174,13 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
             float density = getContext().getResources().getDisplayMetrics().density;
             mLeftEdgeZonePx = (int) (LEFT_EDGE_ZONE_DP * density);
             mSwipeThresholdPx = (int) (SWIPE_THRESHOLD_DP * density);
+
+            // Set up the swipe margin view
+            SwipeMarginView swipeMargin = findViewById(R.id.swipe_margin);
+            if (swipeMargin != null) {
+                swipeMargin.setTerminalView(mTerminalView);
+                // EdgePanelManager will be set later via setEdgePanelManager()
+            }
         }
     }
 
@@ -202,6 +209,12 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
      */
     public void setEdgePanelManager(EdgePanelManager manager) {
         mEdgePanelManager = manager;
+
+        // Also set on the swipe margin view
+        SwipeMarginView swipeMargin = findViewById(R.id.swipe_margin);
+        if (swipeMargin != null) {
+            swipeMargin.setEdgePanelManager(manager);
+        }
     }
 
     /**

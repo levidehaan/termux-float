@@ -41,6 +41,11 @@
             android:theme="@android:style/Theme.Material"
             android:name=".TermuxFloatPermissionActivity" />
 
+        <activity
+            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
+            android:name=".TermuxFloatSettingsActivity"
+            android:label="Settings" />
+
         <service android:name=".TermuxFloatService" android:exported="false"/>
 
         <!-- Droid Event Service for Android event listeners -->

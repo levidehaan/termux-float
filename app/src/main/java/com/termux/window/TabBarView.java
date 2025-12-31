@@ -26,6 +26,7 @@ public class TabBarView extends LinearLayout {
     private HorizontalScrollView mScrollView;
     private LinearLayout mTabContainer;
     private ImageButton mNewTabButton;
+    private ImageButton mSettingsButton;
     private ImageButton mCollapseButton;
 
     private Map<String, TabView> mTabViews = new HashMap<>();
@@ -34,6 +35,7 @@ public class TabBarView extends LinearLayout {
 
     public interface TabBarListener {
         void onNewTabClicked();
+        void onSettingsClicked();
         void onCollapseClicked();
         void onTabClicked(String tabId);
         void onTabCloseClicked(String tabId);
@@ -96,6 +98,22 @@ public class TabBarView extends LinearLayout {
             }
         });
         addView(mNewTabButton);
+
+        // Create settings button
+        mSettingsButton = new ImageButton(getContext());
+        LayoutParams settingsParams = new LayoutParams(btnSize, btnSize);
+        settingsParams.setMargins(0, margin, margin, margin);
+        mSettingsButton.setLayoutParams(settingsParams);
+        mSettingsButton.setBackgroundColor(Color.TRANSPARENT);
+        mSettingsButton.setImageResource(android.R.drawable.ic_menu_preferences);
+        mSettingsButton.setColorFilter(Color.parseColor("#888888"));
+        mSettingsButton.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        mSettingsButton.setOnClickListener(v -> {
+            if (mListener != null) {
+                mListener.onSettingsClicked();
+            }
+        });
+        addView(mSettingsButton);
 
         // Create collapse button
         mCollapseButton = new ImageButton(getContext());
