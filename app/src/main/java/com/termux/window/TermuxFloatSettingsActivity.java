@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -60,13 +61,29 @@ public class TermuxFloatSettingsActivity extends Activity {
         container.setOrientation(LinearLayout.VERTICAL);
         container.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
 
-        // Title
+        // Title row with close button
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setPadding(0, 0, 0, dpToPx(24));
+
         TextView title = new TextView(this);
         title.setText("Termux Float Settings");
         title.setTextSize(24);
         title.setTextColor(Color.WHITE);
-        title.setPadding(0, 0, 0, dpToPx(24));
-        container.addView(title);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        title.setLayoutParams(titleParams);
+        titleRow.addView(title);
+
+        // Close button
+        Button closeButton = new Button(this);
+        closeButton.setText("Close");
+        closeButton.setTextColor(Color.WHITE);
+        closeButton.setBackgroundColor(Color.parseColor("#03dac6"));
+        closeButton.setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8));
+        closeButton.setOnClickListener(v -> finish());
+        titleRow.addView(closeButton);
+
+        container.addView(titleRow);
 
         // Swipe Margin Section
         container.addView(createSectionHeader("Swipe Margin"));

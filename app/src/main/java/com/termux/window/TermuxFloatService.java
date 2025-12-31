@@ -533,6 +533,9 @@ public class TermuxFloatService extends Service implements
      * Open the settings activity.
      */
     private void openSettings() {
+        // Collapse the panel first so settings is visible
+        collapsePanel();
+
         Intent intent = new Intent(this, TermuxFloatSettingsActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(intent);

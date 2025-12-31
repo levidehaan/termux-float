@@ -6,10 +6,12 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 
 import com.termux.shared.logger.Logger;
+import com.termux.shared.view.ViewUtils;
 import com.termux.view.TerminalView;
 
 /**
@@ -18,15 +20,15 @@ import com.termux.view.TerminalView;
  * touch zone for closing the panel without interfering with the terminal.
  *
  * Features:
- * - Swipe right to close the panel
+ * - Swipe right to close the panel (detected by finger exiting view or velocity)
  * - Vertical scroll to fast-scroll the terminal
  * - Visual feedback when touched
  */
 public class SwipeMarginView extends View {
     private static final String LOG_TAG = "SwipeMarginView";
 
-    // Swipe detection thresholds
-    private static final int SWIPE_THRESHOLD_DP = 60;
+    // Velocity threshold for swipe detection (pixels per second)
+    private static final int SWIPE_VELOCITY_THRESHOLD = 500;
 
     // Touch tracking
     private float mStartX;
@@ -35,13 +37,16 @@ public class SwipeMarginView extends View {
     private boolean mIsSwipeGesture = false;
     private boolean mIsScrollGesture = false;
 
-    // Pixel values (calculated from dp)
-    private int mSwipeThresholdPx;
+    // Velocity tracking
+    private VelocityTracker mVelocityTracker;
+
+    // Pixel values
     private int mTouchSlop;
 
     // Visual feedback
     private Paint mHighlightPaint;
     private Paint mIndicatorPaint;
+    private Paint mArrowPaint;
     private boolean mIsTouched = false;
 
     // References
@@ -64,20 +69,24 @@ public class SwipeMarginView extends View {
     }
 
     private void init(Context context) {
-        float density = context.getResources().getDisplayMetrics().density;
-        mSwipeThresholdPx = (int) (SWIPE_THRESHOLD_DP * density);
         mTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
 
         // Highlight paint for when touched
         mHighlightPaint = new Paint();
-        mHighlightPaint.setColor(0x20ffffff); // Semi-transparent white
+        mHighlightPaint.setColor(0x30ffffff); // Semi-transparent white
         mHighlightPaint.setStyle(Paint.Style.FILL);
 
         // Indicator paint for subtle visual cue
         mIndicatorPaint = new Paint();
-        mIndicatorPaint.setColor(0x30ffffff);
+        mIndicatorPaint.setColor(0x40ffffff);
         mIndicatorPaint.setStyle(Paint.Style.FILL);
         mIndicatorPaint.setAntiAlias(true);
+
+        // Arrow paint for swipe hint
+        mArrowPaint = new Paint();
+        mArrowPaint.setColor(0x60ffffff);
+        mArrowPaint.setStyle(Paint.Style.FILL);
+        mArrowPaint.setAntiAlias(true);
 
         // Make view clickable to receive touch events
         setClickable(true);
@@ -98,29 +107,68 @@ public class SwipeMarginView extends View {
         mTerminalView = terminalView;
     }
 
+    /**
+     * Update the width based on settings.
+     */
+    public void updateWidth() {
+        int widthDp = TermuxFloatSettingsActivity.getSwipeMarginWidth(getContext());
+        int widthPx = (int) ViewUtils.dpToPx(getContext(), widthDp);
+
+        android.view.ViewGroup.LayoutParams params = getLayoutParams();
+        if (params != null) {
+            params.width = widthPx;
+            setLayoutParams(params);
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // Apply width from settings when attached
+        updateWidth();
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
+        int width = getWidth();
+        int height = getHeight();
+
         // Draw subtle vertical line indicator on right edge
         float indicatorWidth = 2f;
         canvas.drawRect(
-            getWidth() - indicatorWidth,
+            width - indicatorWidth,
             0,
-            getWidth(),
-            getHeight(),
+            width,
+            height,
             mIndicatorPaint
         );
 
+        // Draw small arrow hints in the middle
+        float centerY = height / 2f;
+        float arrowSize = Math.min(width * 0.4f, 12f);
+
+        // Draw a simple ">" arrow hint
+        float arrowX = width * 0.3f;
+        canvas.drawCircle(arrowX, centerY, arrowSize / 3, mArrowPaint);
+        canvas.drawCircle(arrowX + arrowSize / 2, centerY, arrowSize / 4, mArrowPaint);
+
         // Draw highlight when touched
         if (mIsTouched) {
-            canvas.drawRect(0, 0, getWidth(), getHeight(), mHighlightPaint);
+            canvas.drawRect(0, 0, width, height, mHighlightPaint);
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        // Initialize velocity tracker
+        if (mVelocityTracker == null) {
+            mVelocityTracker = VelocityTracker.obtain();
+        }
+        mVelocityTracker.addMovement(event);
+
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 mStartX = event.getRawX();
@@ -130,7 +178,7 @@ public class SwipeMarginView extends View {
                 mIsScrollGesture = false;
                 mIsTouched = true;
                 invalidate();
-                Logger.logDebug(LOG_TAG, "Touch down in swipe margin");
+                Logger.logDebug(LOG_TAG, "Touch down in swipe margin at x=" + event.getX());
                 return true;
 
             case MotionEvent.ACTION_MOVE:
@@ -138,13 +186,14 @@ public class SwipeMarginView extends View {
                 float deltaY = event.getRawY() - mStartY;
                 float moveY = event.getRawY() - mLastY;
                 mLastY = event.getRawY();
+                float localX = event.getX();
 
                 // Determine gesture type if not yet decided
                 if (!mIsSwipeGesture && !mIsScrollGesture) {
                     if (Math.abs(deltaX) > mTouchSlop || Math.abs(deltaY) > mTouchSlop) {
                         if (Math.abs(deltaX) > Math.abs(deltaY)) {
                             mIsSwipeGesture = true;
-                            Logger.logDebug(LOG_TAG, "Detected horizontal swipe gesture");
+                            Logger.logDebug(LOG_TAG, "Detected horizontal swipe gesture, deltaX=" + deltaX);
                         } else {
                             mIsScrollGesture = true;
                             Logger.logDebug(LOG_TAG, "Detected vertical scroll gesture");
@@ -153,14 +202,20 @@ public class SwipeMarginView extends View {
                 }
 
                 // Handle horizontal swipe to close
-                if (mIsSwipeGesture) {
-                    if (deltaX > mSwipeThresholdPx) {
-                        Logger.logDebug(LOG_TAG, "Swipe threshold reached, collapsing panel");
-                        mIsTouched = false;
-                        invalidate();
-                        if (mEdgePanelManager != null) {
-                            mEdgePanelManager.collapse();
-                        }
+                if (mIsSwipeGesture && deltaX > 0) {
+                    // Check if finger has exited the view bounds to the right
+                    if (localX > getWidth()) {
+                        Logger.logDebug(LOG_TAG, "Finger exited view, collapsing panel");
+                        triggerCollapse();
+                        return true;
+                    }
+
+                    // Check velocity
+                    mVelocityTracker.computeCurrentVelocity(1000);
+                    float velocityX = mVelocityTracker.getXVelocity();
+                    if (velocityX > SWIPE_VELOCITY_THRESHOLD) {
+                        Logger.logDebug(LOG_TAG, "Swipe velocity threshold reached: " + velocityX);
+                        triggerCollapse();
                         return true;
                     }
                 }
@@ -179,6 +234,16 @@ public class SwipeMarginView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                float finalDeltaX = event.getRawX() - mStartX;
+
+                // Check for swipe on release - if moved right significantly
+                if (mIsSwipeGesture && finalDeltaX > getWidth() * 0.5f) {
+                    Logger.logDebug(LOG_TAG, "Swipe completed on release, deltaX=" + finalDeltaX);
+                    triggerCollapse();
+                    return true;
+                }
+
+                // Fall through to cleanup
             case MotionEvent.ACTION_CANCEL:
                 mIsTouched = false;
                 invalidate();
@@ -197,8 +262,30 @@ public class SwipeMarginView extends View {
 
                 mIsSwipeGesture = false;
                 mIsScrollGesture = false;
+
+                // Recycle velocity tracker
+                if (mVelocityTracker != null) {
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                }
                 return true;
         }
         return super.onTouchEvent(event);
+    }
+
+    private void triggerCollapse() {
+        mIsTouched = false;
+        invalidate();
+        mIsSwipeGesture = false;
+        mIsScrollGesture = false;
+
+        if (mVelocityTracker != null) {
+            mVelocityTracker.recycle();
+            mVelocityTracker = null;
+        }
+
+        if (mEdgePanelManager != null) {
+            mEdgePanelManager.collapse();
+        }
     }
 }
