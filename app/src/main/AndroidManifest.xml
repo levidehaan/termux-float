@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- For droid event service -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        tools:targetApi="upside_down_cake" />
+
     <application
         android:name=".TermuxFloatApplication"
         android:allowBackup="true"
@@ -34,6 +42,26 @@
             android:name=".TermuxFloatPermissionActivity" />
 
         <service android:name=".TermuxFloatService" android:exported="false"/>
+
+        <!-- Droid Event Service for Android event listeners -->
+        <service
+            android:name=".droid.DroidEventService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="event_monitoring" />
+        </service>
+
+        <!-- Boot completed receiver for droid events -->
+        <receiver
+            android:name=".droid.BootCompletedReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

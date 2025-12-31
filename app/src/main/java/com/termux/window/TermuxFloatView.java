@@ -27,7 +27,7 @@ import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 import com.termux.window.settings.properties.TermuxFloatAppSharedProperties;
 
-public class TermuxFloatView extends LinearLayout {
+public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.EdgeSwipeListener {
 
     public static final float ALPHA_FOCUS = 0.9f;
     public static final float ALPHA_NOT_FOCUS = 0.7f;
@@ -41,6 +41,11 @@ public class TermuxFloatView extends LinearLayout {
     private TerminalView mTerminalView;
     ViewGroup mWindowControls;
     FloatingBubbleManager mFloatingBubbleManager;
+
+    // Edge panel mode support
+    private EdgeSwipeDetector mEdgeSwipeDetector;
+    private boolean mUseSidePanelMode = false;
+    private EdgePanelManager mEdgePanelManager;
 
     /**
      *  The {@link TerminalViewClient} interface implementation to allow for communication between
@@ -141,19 +146,76 @@ public class TermuxFloatView extends LinearLayout {
         mTerminalView.setTerminalViewClient(mTermuxFloatViewClient);
         mTermuxFloatViewClient.initFloatView();
 
-        mFloatingBubbleManager = new FloatingBubbleManager(this);
-        initWindowControls();
+        // Check if we're using the new side panel layout or the old floating window layout
+        mWindowControls = findViewById(R.id.window_controls);
+        if (mWindowControls != null) {
+            // Old floating window mode
+            mUseSidePanelMode = false;
+            mFloatingBubbleManager = new FloatingBubbleManager(this);
+            initWindowControls();
+        } else {
+            // New side panel mode
+            mUseSidePanelMode = true;
+            mEdgeSwipeDetector = new EdgeSwipeDetector(getContext(), this);
+        }
     }
 
     private void initWindowControls() {
-        mWindowControls = findViewById(R.id.window_controls);
+        if (mWindowControls == null) return;
+
         mWindowControls.setOnClickListener(v -> changeFocus(true));
 
         Button minimizeButton = findViewById(R.id.minimize_button);
-        minimizeButton.setOnClickListener(v -> mFloatingBubbleManager.toggleBubble());
+        if (minimizeButton != null) {
+            minimizeButton.setOnClickListener(v -> {
+                if (mFloatingBubbleManager != null) {
+                    mFloatingBubbleManager.toggleBubble();
+                }
+            });
+        }
 
         Button exitButton = findViewById(R.id.exit_button);
-        exitButton.setOnClickListener(v -> exit());
+        if (exitButton != null) {
+            exitButton.setOnClickListener(v -> exit());
+        }
+    }
+
+    /**
+     * Set the edge panel manager for side panel mode.
+     */
+    public void setEdgePanelManager(EdgePanelManager manager) {
+        mEdgePanelManager = manager;
+    }
+
+    /**
+     * Check if using side panel mode.
+     */
+    public boolean isUsingSidePanelMode() {
+        return mUseSidePanelMode;
+    }
+
+    // EdgeSwipeListener implementation
+    @Override
+    public boolean onSwipeInward() {
+        if (mEdgePanelManager != null) {
+            mEdgePanelManager.expand();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onSwipeOutward() {
+        if (mEdgePanelManager != null) {
+            mEdgePanelManager.collapse();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public void onTap() {
+        changeFocus(true);
     }
 
     @Override
@@ -210,6 +272,11 @@ public class TermuxFloatView extends LinearLayout {
      */
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
+        // In side panel mode, let edge swipe detector handle touch events
+        if (mUseSidePanelMode && mEdgeSwipeDetector != null) {
+            mEdgeSwipeDetector.onTouch(this, event);
+        }
+
         if (isInLongPressState) return true;
 
         getLocationOnScreen(location);
@@ -241,7 +308,7 @@ public class TermuxFloatView extends LinearLayout {
     }
 
     private boolean didClickInsideWindowControls(float touchX, float touchY) {
-        if (mWindowControls.getVisibility() == View.GONE) {
+        if (mWindowControls == null || mWindowControls.getVisibility() == View.GONE) {
             return false;
         }
         mWindowControls.getLocationOnScreen(windowControlsLocation);
@@ -263,10 +330,13 @@ public class TermuxFloatView extends LinearLayout {
 
     void updateLongPressMode(boolean newValue) {
         isInLongPressState = newValue;
-        mFloatingBubbleManager.updateLongPressBackgroundResource(isInLongPressState);
+        if (mFloatingBubbleManager != null) {
+            mFloatingBubbleManager.updateLongPressBackgroundResource(isInLongPressState);
+        }
         setAlpha(newValue ? ALPHA_MOVING : (withFocus ? ALPHA_FOCUS : ALPHA_NOT_FOCUS));
-        if (newValue && !mFloatingBubbleManager.isMinimized())
+        if (newValue && mFloatingBubbleManager != null && !mFloatingBubbleManager.isMinimized()) {
             Logger.showToast(getContext(), getContext().getString(R.string.after_long_press), false);
+        }
     }
 
     /**
@@ -301,7 +371,7 @@ public class TermuxFloatView extends LinearLayout {
      * Visually indicate focus and show the soft input as needed.
      */
     void changeFocus(boolean newFocus) {
-        if (newFocus && mFloatingBubbleManager.isMinimized()) {
+        if (newFocus && mFloatingBubbleManager != null && mFloatingBubbleManager.isMinimized()) {
             mFloatingBubbleManager.displayAsFloatingWindow();
         }
         if (newFocus == withFocus) {
@@ -319,8 +389,15 @@ public class TermuxFloatView extends LinearLayout {
         if (getWindowToken() != null)
             mWindowManager.removeView(this);
 
-        mFloatingBubbleManager.cleanup();
-        mFloatingBubbleManager = null;
+        if (mFloatingBubbleManager != null) {
+            mFloatingBubbleManager.cleanup();
+            mFloatingBubbleManager = null;
+        }
+
+        if (mEdgePanelManager != null) {
+            mEdgePanelManager.cleanup();
+            mEdgePanelManager = null;
+        }
     }
 
     private void exit() {

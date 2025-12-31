@@ -1,0 +1,364 @@
+#!/data/data/com.termux/files/usr/bin/bash
+#
+# llama - AI assistant CLI for Termux Float
+#
+# Usage:
+#   llama -c "prompt"                    Send a prompt
+#   echo "data" | llama -c "prompt"      Send data with a prompt
+#   llama -i                             Interactive mode
+#   llama --models                       List available models
+#   llama -m model -c "prompt"           Use specific model
+#
+# Examples:
+#   cat error.log | llama -c "Explain these errors"
+#   llama -c "Write a bash script to backup my files"
+#   llama -i
+#
+
+set -e
+
+# Configuration
+LLAMA_DIR="$HOME/.local/share/llama"
+MODEL_DIR="$LLAMA_DIR/models"
+CONFIG_FILE="$LLAMA_DIR/config"
+DEFAULT_CONTEXT=4096
+
+# llama.cpp binary (will be set during installation)
+LLAMA_BIN="${LLAMA_BIN:-$PREFIX/lib/llama.cpp/llama-cli}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Initialize directories
+init_dirs() {
+    mkdir -p "$MODEL_DIR"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        cat > "$CONFIG_FILE" << 'EOF'
+# llama configuration
+DEFAULT_MODEL=
+CONTEXT_SIZE=4096
+THREADS=4
+EOF
+    fi
+}
+
+# Load configuration
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+print_usage() {
+    cat << 'EOF'
+Usage: llama [OPTIONS] [-c PROMPT]
+
+AI assistant powered by llama.cpp for Termux.
+
+Options:
+  -c, --prompt PROMPT   Send a prompt to the AI
+  -m, --model MODEL     Use specific model (default: from config)
+  -i, --interactive     Start interactive chat mode
+  -n, --tokens N        Max tokens to generate (default: 512)
+  -t, --threads N       Number of CPU threads (default: 4)
+  --context N           Context size (default: 4096)
+  --models              List installed models
+  --download MODEL      Download a model
+  --default MODEL       Set default model
+  --info                Show current configuration
+  -h, --help            Show this help
+
+Input Handling:
+  Data can be piped to llama and will be included before your prompt.
+
+Examples:
+  llama -c "What is the meaning of life?"
+  cat error.log | llama -c "Explain these errors and suggest fixes"
+  llama -c "Write a Python function to sort a list" | python3
+  llama -i
+
+Model Management:
+  llama --models                    List installed models
+  llama --download phi-3-mini       Download Phi-3 Mini model
+  llama --default phi-3-mini        Set as default model
+
+Supported Models:
+  phi-3-mini      Microsoft Phi-3 Mini (3.8B params, ~2GB)
+  llama-3.2-1b    Meta Llama 3.2 1B (~0.6GB)
+  qwen2-1.5b      Alibaba Qwen2 1.5B (~1GB)
+  tinyllama       TinyLlama 1.1B (~0.5GB)
+EOF
+}
+
+# List installed models
+list_models() {
+    echo -e "${BLUE}Installed models:${NC}"
+    if [[ -d "$MODEL_DIR" ]]; then
+        local found=0
+        for model in "$MODEL_DIR"/*.gguf; do
+            if [[ -f "$model" ]]; then
+                local name=$(basename "$model" .gguf)
+                local size=$(du -h "$model" | cut -f1)
+                local default_marker=""
+                if [[ "$name" == "$DEFAULT_MODEL" ]]; then
+                    default_marker=" ${GREEN}(default)${NC}"
+                fi
+                echo -e "  $name ($size)$default_marker"
+                found=1
+            fi
+        done
+        if [[ $found -eq 0 ]]; then
+            echo -e "  ${YELLOW}No models installed${NC}"
+            echo -e "  Run 'llama --download <model>' to download one"
+        fi
+    else
+        echo -e "  ${YELLOW}No models installed${NC}"
+    fi
+}
+
+# Download a model
+download_model() {
+    local model_name="$1"
+
+    # Model URLs (Q4_K_M quantization for good quality/size balance)
+    declare -A MODEL_URLS=(
+        ["phi-3-mini"]="https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf"
+        ["llama-3.2-1b"]="https://huggingface.co/hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-1b-instruct-q4_k_m.gguf"
+        ["qwen2-1.5b"]="https://huggingface.co/Qwen/Qwen2-1.5B-Instruct-GGUF/resolve/main/qwen2-1_5b-instruct-q4_k_m.gguf"
+        ["tinyllama"]="https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    )
+
+    if [[ -z "${MODEL_URLS[$model_name]}" ]]; then
+        echo -e "${RED}Unknown model: $model_name${NC}"
+        echo "Available models: phi-3-mini, llama-3.2-1b, qwen2-1.5b, tinyllama"
+        exit 1
+    fi
+
+    local url="${MODEL_URLS[$model_name]}"
+    local output_file="$MODEL_DIR/$model_name.gguf"
+
+    echo -e "${BLUE}Downloading $model_name...${NC}"
+    echo "This may take a while depending on your connection."
+
+    mkdir -p "$MODEL_DIR"
+
+    if command -v curl &> /dev/null; then
+        curl -L --progress-bar -o "$output_file" "$url"
+    elif command -v wget &> /dev/null; then
+        wget --show-progress -O "$output_file" "$url"
+    else
+        echo -e "${RED}Error: curl or wget is required${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Downloaded: $output_file${NC}"
+
+    # Set as default if no default exists
+    if [[ -z "$DEFAULT_MODEL" ]]; then
+        set_default_model "$model_name"
+    fi
+}
+
+# Set default model
+set_default_model() {
+    local model_name="$1"
+    local model_file="$MODEL_DIR/$model_name.gguf"
+
+    if [[ ! -f "$model_file" ]]; then
+        echo -e "${RED}Model not found: $model_name${NC}"
+        echo "Run 'llama --download $model_name' first"
+        exit 1
+    fi
+
+    # Update config
+    if grep -q "^DEFAULT_MODEL=" "$CONFIG_FILE" 2>/dev/null; then
+        sed -i "s/^DEFAULT_MODEL=.*/DEFAULT_MODEL=$model_name/" "$CONFIG_FILE"
+    else
+        echo "DEFAULT_MODEL=$model_name" >> "$CONFIG_FILE"
+    fi
+
+    echo -e "${GREEN}Default model set to: $model_name${NC}"
+}
+
+# Show configuration
+show_info() {
+    echo -e "${BLUE}llama configuration:${NC}"
+    echo "  Binary: $LLAMA_BIN"
+    echo "  Model directory: $MODEL_DIR"
+    echo "  Default model: ${DEFAULT_MODEL:-<not set>}"
+    echo "  Context size: ${CONTEXT_SIZE:-$DEFAULT_CONTEXT}"
+    echo "  Threads: ${THREADS:-4}"
+    echo ""
+
+    if [[ -x "$LLAMA_BIN" ]]; then
+        echo -e "${GREEN}llama.cpp is installed${NC}"
+    else
+        echo -e "${YELLOW}llama.cpp binary not found at: $LLAMA_BIN${NC}"
+        echo "Install with: pkg install llama.cpp"
+    fi
+}
+
+# Run inference
+run_inference() {
+    local prompt="$1"
+    local model="$2"
+    local max_tokens="${3:-512}"
+    local threads="${4:-${THREADS:-4}}"
+    local context="${5:-${CONTEXT_SIZE:-$DEFAULT_CONTEXT}}"
+
+    # Find model file
+    local model_file=""
+    if [[ -n "$model" ]]; then
+        model_file="$MODEL_DIR/$model.gguf"
+    elif [[ -n "$DEFAULT_MODEL" ]]; then
+        model_file="$MODEL_DIR/$DEFAULT_MODEL.gguf"
+    else
+        echo -e "${RED}No model specified and no default model set${NC}"
+        echo "Run 'llama --download phi-3-mini' to download a model"
+        exit 1
+    fi
+
+    if [[ ! -f "$model_file" ]]; then
+        echo -e "${RED}Model file not found: $model_file${NC}"
+        exit 1
+    fi
+
+    if [[ ! -x "$LLAMA_BIN" ]]; then
+        echo -e "${RED}llama.cpp binary not found: $LLAMA_BIN${NC}"
+        echo "Install with: pkg install llama.cpp"
+        exit 1
+    fi
+
+    # Run inference
+    "$LLAMA_BIN" \
+        -m "$model_file" \
+        -c "$context" \
+        -n "$max_tokens" \
+        -t "$threads" \
+        --no-display-prompt \
+        -p "$prompt"
+}
+
+# Interactive mode
+interactive_mode() {
+    local model="$1"
+
+    echo -e "${CYAN}llama interactive mode${NC}"
+    echo -e "Model: ${model:-$DEFAULT_MODEL}"
+    echo -e "Type 'exit' or press Ctrl+D to quit"
+    echo ""
+
+    while true; do
+        echo -ne "${GREEN}You: ${NC}"
+        read -r input
+
+        if [[ -z "$input" ]] || [[ "$input" == "exit" ]]; then
+            echo "Goodbye!"
+            break
+        fi
+
+        echo -e "${BLUE}AI: ${NC}"
+        run_inference "$input" "$model" 512
+        echo ""
+    done
+}
+
+# Main
+init_dirs
+load_config
+
+# Parse arguments
+PROMPT=""
+MODEL=""
+INTERACTIVE=0
+MAX_TOKENS=512
+THREADS="${THREADS:-4}"
+CONTEXT="${CONTEXT_SIZE:-$DEFAULT_CONTEXT}"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--prompt)
+            PROMPT="$2"
+            shift 2
+            ;;
+        -m|--model)
+            MODEL="$2"
+            shift 2
+            ;;
+        -i|--interactive)
+            INTERACTIVE=1
+            shift
+            ;;
+        -n|--tokens)
+            MAX_TOKENS="$2"
+            shift 2
+            ;;
+        -t|--threads)
+            THREADS="$2"
+            shift 2
+            ;;
+        --context)
+            CONTEXT="$2"
+            shift 2
+            ;;
+        --models)
+            list_models
+            exit 0
+            ;;
+        --download)
+            download_model "$2"
+            exit 0
+            ;;
+        --default)
+            set_default_model "$2"
+            exit 0
+            ;;
+        --info)
+            show_info
+            exit 0
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Check for piped input
+STDIN_DATA=""
+if [[ ! -t 0 ]]; then
+    STDIN_DATA=$(cat)
+fi
+
+# Build full prompt with piped data
+if [[ -n "$STDIN_DATA" && -n "$PROMPT" ]]; then
+    FULL_PROMPT="$STDIN_DATA
+
+$PROMPT"
+elif [[ -n "$STDIN_DATA" ]]; then
+    FULL_PROMPT="$STDIN_DATA"
+elif [[ -n "$PROMPT" ]]; then
+    FULL_PROMPT="$PROMPT"
+else
+    FULL_PROMPT=""
+fi
+
+# Run in appropriate mode
+if [[ $INTERACTIVE -eq 1 ]]; then
+    interactive_mode "$MODEL"
+elif [[ -n "$FULL_PROMPT" ]]; then
+    run_inference "$FULL_PROMPT" "$MODEL" "$MAX_TOKENS" "$THREADS" "$CONTEXT"
+else
+    print_usage
+    exit 1
+fi

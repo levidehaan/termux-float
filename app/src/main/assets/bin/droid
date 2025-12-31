@@ -1,0 +1,218 @@
+#!/data/data/com.termux/files/usr/bin/bash
+#
+# droid - Android event listener CLI for Termux Float
+#
+# Usage:
+#   droid --list                          List available events
+#   droid --jobs                          List active event listeners
+#   droid <event> <command>               One-time trigger
+#   droid --count N <event> <command>     Trigger N times
+#   droid --daemon <event> <command>      Persistent listener (daemon)
+#   droid --stop <job-id>                 Stop a running listener
+#   droid --stop-all                      Stop all listeners
+#
+# Examples:
+#   droid battery_low "notify-send 'Battery Low!'"
+#   droid --daemon screen_on "echo 'Unlocked at $(date)' >> ~/unlock.log"
+#   droid --count 3 power_connected "vibrate 100"
+#
+
+set -e
+
+SOCKET_NAME="droid_events"
+SOCKET_PATH="/data/data/com.termux.window/droid_events"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_usage() {
+    cat << 'EOF'
+Usage: droid [OPTIONS] <event> <command>
+
+Trigger shell commands on Android system events.
+
+Options:
+  --list, -l            List all available events
+  --jobs, -j            List active event listeners
+  --daemon, -d          Run as persistent daemon (never expires)
+  --count N, -c N       Trigger N times then stop (default: 1)
+  --stop <job-id>       Stop a specific listener
+  --stop-all            Stop all listeners
+  --help, -h            Show this help message
+
+Examples:
+  droid battery_low "notify-send 'Battery Low!'"
+  droid --daemon screen_on "echo Unlocked >> ~/log.txt"
+  droid --count 5 power_connected "vibrate 100"
+  droid --stop abc123
+
+Environment variables passed to commands:
+  DROID_EVENT           Event type name
+  DROID_TIMESTAMP       Unix timestamp of event
+  DROID_JOB_ID          Job identifier
+  DROID_BATTERY_LEVEL   Battery percentage (for battery events)
+  DROID_POWER_STATE     connected/disconnected (for power events)
+  DROID_WIFI_STATE      enabled/disabled (for wifi events)
+  DROID_NETWORK_TYPE    Network type (for connectivity events)
+
+Run 'droid --list' to see all available events.
+EOF
+}
+
+print_events() {
+    cat << 'EOF'
+Available events:
+
+Battery:
+  battery_low         Battery dropped below threshold
+  battery_okay        Battery back to acceptable level
+  battery_changed     Any battery state change
+
+Power:
+  power_connected     Charger plugged in
+  power_disconnected  Charger unplugged
+
+Screen:
+  screen_on           Screen turned on
+  screen_off          Screen turned off
+  user_present        User unlocked device
+
+Network:
+  connectivity_change Network state changed
+  wifi_state_changed  WiFi enabled/disabled
+
+System:
+  airplane_mode       Airplane mode toggled
+  timezone_changed    Timezone changed
+  locale_changed      System locale changed
+  boot_completed      Device finished booting
+
+Hardware:
+  headset_plug        Headphones plugged/unplugged
+  media_mounted       External storage mounted
+  media_unmounted     External storage unmounted
+
+Packages:
+  package_added       New app installed
+  package_removed     App uninstalled
+
+Time:
+  time_tick           System time tick (every minute)
+  date_changed        Date has changed
+EOF
+}
+
+send_command() {
+    local cmd="$1"
+    # Use nc (netcat) to send command to the service socket
+    echo "$cmd" | nc -U "$SOCKET_PATH" 2>/dev/null || {
+        echo -e "${RED}Error: Cannot connect to DroidEventService${NC}"
+        echo "Make sure Termux Float is running with the droid service enabled."
+        exit 1
+    }
+}
+
+# Parse arguments
+COUNT=1
+DAEMON=0
+EVENT=""
+COMMAND=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --list|-l)
+            print_events
+            exit 0
+            ;;
+        --jobs|-j)
+            RESPONSE=$(send_command "LIST")
+            if [[ "$RESPONSE" == OK\|* ]]; then
+                echo "${RESPONSE#OK|}"
+            else
+                echo -e "${RED}${RESPONSE#ERROR|}${NC}"
+                exit 1
+            fi
+            exit 0
+            ;;
+        --daemon|-d)
+            DAEMON=1
+            COUNT=0
+            shift
+            ;;
+        --count|-c)
+            COUNT="$2"
+            shift 2
+            ;;
+        --stop)
+            JOB_ID="$2"
+            RESPONSE=$(send_command "UNREGISTER|$JOB_ID")
+            if [[ "$RESPONSE" == OK\|* ]]; then
+                echo -e "${GREEN}Stopped job: $JOB_ID${NC}"
+            else
+                echo -e "${RED}${RESPONSE#ERROR|}${NC}"
+                exit 1
+            fi
+            exit 0
+            ;;
+        --stop-all)
+            RESPONSE=$(send_command "STOP_ALL")
+            if [[ "$RESPONSE" == OK\|* ]]; then
+                echo -e "${GREEN}All jobs stopped${NC}"
+            else
+                echo -e "${RED}${RESPONSE#ERROR|}${NC}"
+                exit 1
+            fi
+            exit 0
+            ;;
+        --help|-h)
+            print_usage
+            exit 0
+            ;;
+        -*)
+            echo -e "${RED}Unknown option: $1${NC}"
+            print_usage
+            exit 1
+            ;;
+        *)
+            if [[ -z "$EVENT" ]]; then
+                EVENT="$1"
+            elif [[ -z "$COMMAND" ]]; then
+                COMMAND="$1"
+            else
+                echo -e "${RED}Too many arguments${NC}"
+                print_usage
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate arguments
+if [[ -z "$EVENT" || -z "$COMMAND" ]]; then
+    echo -e "${RED}Error: Event and command are required${NC}"
+    print_usage
+    exit 1
+fi
+
+# Register the job
+RESPONSE=$(send_command "REGISTER|$EVENT|$COMMAND|$COUNT")
+
+if [[ "$RESPONSE" == OK\|* ]]; then
+    JOB_ID="${RESPONSE#OK|}"
+    if [[ $DAEMON -eq 1 ]]; then
+        echo -e "${GREEN}Started daemon listener: $JOB_ID${NC}"
+        echo -e "Event: ${BLUE}$EVENT${NC}"
+        echo -e "Use 'droid --stop $JOB_ID' to stop"
+    else
+        echo -e "${GREEN}Registered listener: $JOB_ID${NC}"
+        echo -e "Event: ${BLUE}$EVENT${NC}, Count: $COUNT"
+    fi
+else
+    echo -e "${RED}${RESPONSE#ERROR|}${NC}"
+    exit 1
+fi
