@@ -1,0 +1,65 @@
+#!/data/data/com.termux/files/usr/bin/bash
+#
+# llama-models - Model management for llama CLI
+#
+# This is a convenience wrapper around 'llama --models', 'llama --download', etc.
+#
+
+set -e
+
+# Forward to llama with appropriate arguments
+case "${1:-list}" in
+    list|ls)
+        exec llama --models
+        ;;
+    download|dl)
+        if [[ -z "$2" ]]; then
+            echo "Usage: llama-models download <model-name>"
+            echo ""
+            echo "Available models:"
+            echo "  phi-3-mini    Microsoft Phi-3 Mini (~2GB)"
+            echo "  llama-3.2-1b  Meta Llama 3.2 1B (~0.6GB)"
+            echo "  qwen2-1.5b    Alibaba Qwen2 1.5B (~1GB)"
+            echo "  tinyllama     TinyLlama 1.1B (~0.5GB)"
+            exit 1
+        fi
+        exec llama --download "$2"
+        ;;
+    default|set-default)
+        if [[ -z "$2" ]]; then
+            echo "Usage: llama-models default <model-name>"
+            exit 1
+        fi
+        exec llama --default "$2"
+        ;;
+    info)
+        exec llama --info
+        ;;
+    help|--help|-h)
+        cat << 'EOF'
+llama-models - Model management for llama CLI
+
+Commands:
+  list              List installed models
+  download <model>  Download a model
+  default <model>   Set default model
+  info              Show configuration
+
+Available models for download:
+  phi-3-mini    Microsoft Phi-3 Mini (3.8B params, ~2GB)
+  llama-3.2-1b  Meta Llama 3.2 1B (~0.6GB)
+  qwen2-1.5b    Alibaba Qwen2 1.5B (~1GB)
+  tinyllama     TinyLlama 1.1B (~0.5GB)
+
+Examples:
+  llama-models list
+  llama-models download phi-3-mini
+  llama-models default phi-3-mini
+EOF
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'llama-models help' for usage"
+        exit 1
+        ;;
+esac

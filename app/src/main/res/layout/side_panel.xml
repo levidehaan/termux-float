@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.termux.window.TermuxFloatView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/side_panel_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#ff000000"
+    android:orientation="vertical">
+
+    <!-- Tab bar at the top -->
+    <com.termux.window.TabBarView
+        android:id="@+id/tab_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="40dp"
+        android:background="#ff1a1a1a" />
+
+    <!-- Terminal view takes remaining space -->
+    <com.termux.view.TerminalView
+        android:id="@+id/terminal_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:scrollbars="vertical" />
+
+</com.termux.window.TermuxFloatView>

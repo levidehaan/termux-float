@@ -17,4 +17,17 @@
     <string name="notification_action_exit">Exit</string>
     <string name="notification_message_visible">Touch to hide window.</string>
     <string name="notification_message_hidden">Touch to show window.</string>
+
+    <!-- Side panel -->
+    <string name="panel_instruction_toast">Swipe from right edge to open terminal\nSwipe from left edge to close</string>
+    <string name="tab_paused">Tab paused to save memory</string>
+    <string name="tab_resumed">Tab resumed</string>
+    <string name="low_memory_warning">Low memory - pausing inactive tabs</string>
+    <string name="rename_tab_title">Rename Tab</string>
+    <string name="rename_tab_hint">Enter new tab name</string>
+
+    <!-- Droid events -->
+    <string name="droid_notification_title">Droid Event Monitor</string>
+    <string name="droid_notification_text">%d active event listeners</string>
+    <string name="droid_stop_all">Stop All</string>
 </resources>
