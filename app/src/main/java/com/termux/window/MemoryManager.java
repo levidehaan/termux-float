@@ -245,7 +245,6 @@ public class MemoryManager implements ComponentCallbacks2 {
 
             case TRIM_MEMORY_BACKGROUND:
             case TRIM_MEMORY_MODERATE:
-            case TRIM_MEMORY_COMPLETE:
                 // App is in background, aggressively release memory
                 pauseAllInactive();
                 break;
