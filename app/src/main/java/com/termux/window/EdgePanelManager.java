@@ -138,12 +138,24 @@ public class EdgePanelManager {
     }
 
     /**
+     * Update edge indicator params after display dimension change (rotation).
+     */
+    private void updateEdgeIndicatorParams() {
+        mEdgeIndicatorParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        // Height doesn't need to change, but ensure gravity is correct
+        Logger.logDebug(LOG_TAG, "Edge indicator params updated for new display dimensions");
+    }
+
+    /**
      * Show the edge indicator (when panel is collapsed).
      */
     public void showEdgeIndicator() {
         if (mEdgeIndicator == null) {
             initEdgeIndicator();
         }
+
+        // Update params in case display dimensions changed (rotation)
+        updateEdgeIndicatorParams();
 
         if (mEdgeIndicator.getWindowToken() == null) {
             try {
@@ -167,6 +179,16 @@ public class EdgePanelManager {
                 Logger.logStackTrace(LOG_TAG, e);
             }
         }
+    }
+
+    /**
+     * Destroy the edge indicator completely (for rotation).
+     * This ensures fresh view + touch listener when recreated.
+     */
+    public void destroyEdgeIndicator() {
+        hideEdgeIndicator();
+        mEdgeIndicator = null;
+        Logger.logDebug(LOG_TAG, "Edge indicator destroyed for recreation");
     }
 
     /**
