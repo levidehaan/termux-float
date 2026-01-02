@@ -96,12 +96,13 @@ public class TermuxFloatService extends Service implements
                 if (mEdgePanelManager == null) return;
 
                 // Determine if this is a significant orientation change
-                // Portrait: 0° or 180° (315-45° or 135-225°)
-                // Landscape: 90° or 270° (45-135° or 225-315°)
-                boolean isLandscape = (orientation >= 45 && orientation < 135) ||
-                                      (orientation >= 225 && orientation < 315);
-                boolean wasLandscape = (mLastOrientation >= 45 && mLastOrientation < 135) ||
-                                       (mLastOrientation >= 225 && mLastOrientation < 315);
+                // Use tighter thresholds (30°) to detect rotation EARLIER
+                // Portrait: 0° or 180° (330-30° or 150-210°)
+                // Landscape: 90° or 270° (60-120° or 240-300°)
+                boolean isLandscape = (orientation >= 60 && orientation < 120) ||
+                                      (orientation >= 240 && orientation < 300);
+                boolean wasLandscape = (mLastOrientation >= 60 && mLastOrientation < 120) ||
+                                       (mLastOrientation >= 240 && mLastOrientation < 300);
 
                 // Detect transition between portrait and landscape
                 if (mLastOrientation != ORIENTATION_UNKNOWN && isLandscape != wasLandscape) {

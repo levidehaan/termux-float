@@ -173,6 +173,10 @@ public class EdgePanelManager {
     public void hideEdgeIndicator() {
         if (mEdgeIndicator != null && mEdgeIndicator.getWindowToken() != null) {
             try {
+                // Clear touch listener and cancel pending input before removing
+                // This prevents "Input channel disposed without being removed" warnings
+                mEdgeIndicator.setOnTouchListener(null);
+                mEdgeIndicator.cancelPendingInputEvents();
                 mWindowManager.removeView(mEdgeIndicator);
                 Logger.logDebug(LOG_TAG, "Edge indicator hidden");
             } catch (Exception e) {
