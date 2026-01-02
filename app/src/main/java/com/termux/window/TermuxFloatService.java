@@ -107,11 +107,17 @@ public class TermuxFloatService extends Service implements
                 if (mLastOrientation != ORIENTATION_UNKNOWN && isLandscape != wasLandscape) {
                     if (!mRotationInProgress) {
                         mRotationInProgress = true;
-                        Logger.logDebug(LOG_TAG, "Rotation detected via accelerometer! Hiding overlays immediately.");
+                        Logger.logDebug(LOG_TAG, "Rotation detected via accelerometer! Hiding overlays.");
 
-                        // IMMEDIATELY hide all overlay windows before AsyncRotationController starts
-                        mEdgePanelManager.cancelAnimations();
-                        mEdgePanelManager.destroyEdgeIndicator();
+                        // IMPORTANT: OrientationEventListener callback runs on sensor thread,
+                        // but WindowManager operations MUST run on main thread!
+                        mHandler.post(() -> {
+                            if (mEdgePanelManager != null) {
+                                mEdgePanelManager.cancelAnimations();
+                                mEdgePanelManager.destroyEdgeIndicator();
+                                Logger.logDebug(LOG_TAG, "Edge indicator destroyed on main thread");
+                            }
+                        });
 
                         // Reset rotation flag after system rotation should be complete
                         mHandler.postDelayed(() -> {
