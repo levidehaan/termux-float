@@ -106,6 +106,9 @@ public class EdgePanelManager {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+            // Tell the system not to animate this window during rotation
+            // This helps prevent AsyncRotationController crashes
+            params.rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT;
         } else {
             params.type = WindowManager.LayoutParams.TYPE_PHONE;
         }
@@ -369,14 +372,27 @@ public class EdgePanelManager {
     public void onDisplayChanged() {
         updateDisplayDimensions();
 
-        if (mIsExpanded) {
+        if (mIsExpanded && mTermuxFloatView.isAttachedToWindow()) {
             // Update panel size to match new display
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
             params.width = mDisplayWidth;
             params.height = mDisplayHeight;
-            if (mTermuxFloatView.getWindowToken() != null) {
+            try {
                 mWindowManager.updateViewLayout(mTermuxFloatView, params);
+            } catch (IllegalArgumentException e) {
+                Logger.logWarn(LOG_TAG, "Failed to update layout during rotation: " + e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Cancel any running animations. Called during rotation to prevent crashes.
+     */
+    public void cancelAnimations() {
+        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
+            mSlideAnimator.cancel();
+            mIsAnimating = false;
+            Logger.logDebug(LOG_TAG, "Animations cancelled for rotation");
         }
     }
 

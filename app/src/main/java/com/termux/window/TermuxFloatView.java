@@ -283,6 +283,9 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
         layoutParams.height = widthAndHeight;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             layoutParams.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+            // Tell the system not to animate this window during rotation
+            // This helps prevent AsyncRotationController crashes
+            layoutParams.rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT;
         } else {
             layoutParams.type = WindowManager.LayoutParams.TYPE_PHONE;
         }

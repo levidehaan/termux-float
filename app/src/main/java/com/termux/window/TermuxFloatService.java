@@ -686,12 +686,19 @@ public class TermuxFloatService extends Service implements
 
         if (mEdgePanelManager == null) return;
 
+        // Cancel any running animations immediately to prevent rotation crashes
+        mEdgePanelManager.cancelAnimations();
+
         // Simple approach: hide edge indicator in landscape, show in portrait
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             Logger.logDebug(LOG_TAG, "Landscape mode - hiding edge indicator");
             mEdgePanelManager.hideEdgeIndicator();
+            // Update display dimensions for when we come back to portrait
+            mEdgePanelManager.onDisplayChanged();
         } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            // Only show if panel is collapsed
+            // Update display dimensions first
+            mEdgePanelManager.onDisplayChanged();
+            // Only show edge indicator if panel is collapsed
             if (!mEdgePanelManager.isExpanded()) {
                 Logger.logDebug(LOG_TAG, "Portrait mode - showing edge indicator");
                 // Small delay to let the system finish rotating
