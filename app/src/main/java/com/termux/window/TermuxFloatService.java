@@ -402,10 +402,16 @@ public class TermuxFloatService extends Service implements
         createInitialTab();
 
         try {
+            // Initialize float view (adds to WindowManager)
             mFloatingWindow.launchFloatingWindow();
-            // Start collapsed, showing edge indicator
+
+            // Immediately remove from WindowManager since we start collapsed
+            // This prevents AsyncRotationController from grabbing it during rotation
+            mFloatingWindow.getWindowManager().removeView(mFloatingWindow);
+            Logger.logDebug(LOG_TAG, "Main panel removed from WindowManager (starting collapsed)");
+
+            // Start collapsed, showing edge indicator only
             mEdgePanelManager.initEdgeIndicator();
-            mFloatingWindow.setVisibility(View.GONE);
             mEdgePanelManager.showEdgeIndicator();
             mVisibleWindow = false;
         } catch (Exception e) {

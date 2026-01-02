@@ -48,6 +48,7 @@ public class EdgePanelManager {
     // State
     private boolean mIsExpanded = false;
     private boolean mIsAnimating = false;
+    private boolean mMainPanelInWindowManager = false;
 
     // Display dimensions
     private int mDisplayWidth;
@@ -210,6 +211,18 @@ public class EdgePanelManager {
 
         // Keep edge indicator visible - it will be used to close too
 
+        // Add main panel back to WindowManager if not already there
+        if (!mMainPanelInWindowManager) {
+            try {
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+                mWindowManager.addView(mTermuxFloatView, params);
+                mMainPanelInWindowManager = true;
+                Logger.logDebug(LOG_TAG, "Main panel added to WindowManager");
+            } catch (Exception e) {
+                Logger.logStackTrace(LOG_TAG, e);
+            }
+        }
+
         // Make the main view visible
         mTermuxFloatView.setVisibility(View.VISIBLE);
 
@@ -299,8 +312,19 @@ public class EdgePanelManager {
             public void onAnimationEnd(Animator animation) {
                 mIsExpanded = false;
                 mIsAnimating = false;
-                // Hide main view (edge indicator stays visible)
-                mTermuxFloatView.setVisibility(View.GONE);
+
+                // Remove main panel from WindowManager to prevent rotation crashes
+                // AsyncRotationController can't crash if the panel isn't registered
+                if (mMainPanelInWindowManager) {
+                    try {
+                        mWindowManager.removeView(mTermuxFloatView);
+                        mMainPanelInWindowManager = false;
+                        Logger.logDebug(LOG_TAG, "Main panel removed from WindowManager");
+                    } catch (Exception e) {
+                        Logger.logStackTrace(LOG_TAG, e);
+                    }
+                }
+
                 // Ensure edge indicator is shown (in case it wasn't already)
                 showEdgeIndicator();
                 if (mStateListener != null) {

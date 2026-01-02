@@ -482,6 +482,10 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
         setAlpha(newFocus ? ALPHA_FOCUS : ALPHA_NOT_FOCUS);
     }
 
+    public WindowManager getWindowManager() {
+        return mWindowManager;
+    }
+
     public void closeFloatingWindow() {
         if (getWindowToken() != null)
             mWindowManager.removeView(this);
