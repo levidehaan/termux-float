@@ -14,6 +14,8 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.view.LayoutInflater;
+import android.view.OrientationEventListener;
+import android.view.Surface;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -53,6 +55,12 @@ public class TermuxFloatService extends Service implements
     private boolean mVisibleWindow = true;
     private boolean mIsInitialized = false;
 
+    // Rotation detection - uses accelerometer to detect rotation BEFORE system rotation starts
+    private OrientationEventListener mOrientationListener;
+    private int mLastOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    private boolean mRotationInProgress = false;
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -69,6 +77,59 @@ public class TermuxFloatService extends Service implements
 
         // Install CLI scripts (droid, llama) to Termux bin directory
         ScriptInstaller.installScripts(this);
+
+        // Set up orientation listener to detect rotation BEFORE system rotation starts
+        // This allows us to hide overlay windows before AsyncRotationController grabs them
+        setupOrientationListener();
+    }
+
+    /**
+     * Set up orientation listener using accelerometer to detect rotation early.
+     * This fires BEFORE the system rotation animation starts, giving us time to
+     * hide overlay windows before AsyncRotationController can crash us.
+     */
+    private void setupOrientationListener() {
+        mOrientationListener = new OrientationEventListener(this) {
+            @Override
+            public void onOrientationChanged(int orientation) {
+                if (orientation == ORIENTATION_UNKNOWN) return;
+                if (mEdgePanelManager == null) return;
+
+                // Determine if this is a significant orientation change
+                // Portrait: 0° or 180° (315-45° or 135-225°)
+                // Landscape: 90° or 270° (45-135° or 225-315°)
+                boolean isLandscape = (orientation >= 45 && orientation < 135) ||
+                                      (orientation >= 225 && orientation < 315);
+                boolean wasLandscape = (mLastOrientation >= 45 && mLastOrientation < 135) ||
+                                       (mLastOrientation >= 225 && mLastOrientation < 315);
+
+                // Detect transition between portrait and landscape
+                if (mLastOrientation != ORIENTATION_UNKNOWN && isLandscape != wasLandscape) {
+                    if (!mRotationInProgress) {
+                        mRotationInProgress = true;
+                        Logger.logDebug(LOG_TAG, "Rotation detected via accelerometer! Hiding overlays immediately.");
+
+                        // IMMEDIATELY hide all overlay windows before AsyncRotationController starts
+                        mEdgePanelManager.cancelAnimations();
+                        mEdgePanelManager.destroyEdgeIndicator();
+
+                        // Reset rotation flag after system rotation should be complete
+                        mHandler.postDelayed(() -> {
+                            mRotationInProgress = false;
+                        }, 1000);
+                    }
+                }
+
+                mLastOrientation = orientation;
+            }
+        };
+
+        if (mOrientationListener.canDetectOrientation()) {
+            mOrientationListener.enable();
+            Logger.logDebug(LOG_TAG, "Orientation listener enabled for early rotation detection");
+        } else {
+            Logger.logWarn(LOG_TAG, "Orientation detection not available");
+        }
     }
 
     @Override
@@ -117,6 +178,12 @@ public class TermuxFloatService extends Service implements
     public void onDestroy() {
         super.onDestroy();
         Logger.logVerbose(LOG_TAG, "onDestroy");
+
+        // Disable orientation listener
+        if (mOrientationListener != null) {
+            mOrientationListener.disable();
+            mOrientationListener = null;
+        }
 
         if (mMemoryManager != null) {
             mMemoryManager.cleanup();
@@ -701,13 +768,15 @@ public class TermuxFloatService extends Service implements
             mEdgePanelManager.onDisplayChanged();
             // Only show edge indicator if panel is collapsed
             if (!mEdgePanelManager.isExpanded()) {
-                Logger.logDebug(LOG_TAG, "Portrait mode - showing edge indicator");
-                // Small delay to let the system finish rotating
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    if (mEdgePanelManager != null && !mEdgePanelManager.isExpanded()) {
+                Logger.logDebug(LOG_TAG, "Portrait mode - will show edge indicator after delay");
+                // Longer delay to ensure system rotation animation is fully complete
+                // This prevents AsyncRotationController from grabbing our newly added view
+                mHandler.postDelayed(() -> {
+                    if (mEdgePanelManager != null && !mEdgePanelManager.isExpanded() && !mRotationInProgress) {
+                        Logger.logDebug(LOG_TAG, "Portrait mode - showing edge indicator now");
                         mEdgePanelManager.showEdgeIndicator();
                     }
-                }, 300);
+                }, 500);
             }
         }
     }
