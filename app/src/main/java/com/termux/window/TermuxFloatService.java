@@ -7,9 +7,12 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 
@@ -674,5 +677,30 @@ public class TermuxFloatService extends Service implements
 
     public EdgePanelManager getEdgePanelManager() {
         return mEdgePanelManager;
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        Logger.logDebug(LOG_TAG, "Configuration changed, orientation: " + newConfig.orientation);
+
+        if (mEdgePanelManager == null) return;
+
+        // Simple approach: hide edge indicator in landscape, show in portrait
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            Logger.logDebug(LOG_TAG, "Landscape mode - hiding edge indicator");
+            mEdgePanelManager.hideEdgeIndicator();
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            // Only show if panel is collapsed
+            if (!mEdgePanelManager.isExpanded()) {
+                Logger.logDebug(LOG_TAG, "Portrait mode - showing edge indicator");
+                // Small delay to let the system finish rotating
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (mEdgePanelManager != null && !mEdgePanelManager.isExpanded()) {
+                        mEdgePanelManager.showEdgeIndicator();
+                    }
+                }, 300);
+            }
+        }
     }
 }
