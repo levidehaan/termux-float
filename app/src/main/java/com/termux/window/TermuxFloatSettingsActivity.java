@@ -1,24 +1,25 @@
 package com.termux.window;
 
+import android.app.Activity;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
-
 import com.termux.shared.view.ViewUtils;
 
 /**
  * Settings activity for Termux Float customization.
  */
-public class TermuxFloatSettingsActivity extends AppCompatActivity {
+public class TermuxFloatSettingsActivity extends Activity {
     private static final String PREFS_NAME = "termux_float_settings";
 
     // Preference keys
@@ -60,13 +61,29 @@ public class TermuxFloatSettingsActivity extends AppCompatActivity {
         container.setOrientation(LinearLayout.VERTICAL);
         container.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
 
-        // Title
+        // Title row with close button
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setPadding(0, 0, 0, dpToPx(24));
+
         TextView title = new TextView(this);
         title.setText("Termux Float Settings");
         title.setTextSize(24);
         title.setTextColor(Color.WHITE);
-        title.setPadding(0, 0, 0, dpToPx(24));
-        container.addView(title);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        title.setLayoutParams(titleParams);
+        titleRow.addView(title);
+
+        // Close button
+        Button closeButton = new Button(this);
+        closeButton.setText("Close");
+        closeButton.setTextColor(Color.WHITE);
+        closeButton.setBackgroundColor(Color.parseColor("#03dac6"));
+        closeButton.setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8));
+        closeButton.setOnClickListener(v -> finish());
+        titleRow.addView(closeButton);
+
+        container.addView(titleRow);
 
         // Swipe Margin Section
         container.addView(createSectionHeader("Swipe Margin"));
@@ -261,24 +278,24 @@ public class TermuxFloatSettingsActivity extends AppCompatActivity {
     /**
      * Get the swipe margin width from preferences.
      */
-    public static int getSwipeMarginWidth(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static int getSwipeMarginWidth(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getInt(KEY_SWIPE_MARGIN_WIDTH, DEFAULT_SWIPE_MARGIN_WIDTH);
     }
 
     /**
      * Check if fast scroll is enabled.
      */
-    public static boolean isFastScrollEnabled(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static boolean isFastScrollEnabled(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getBoolean(KEY_FAST_SCROLL_ENABLED, DEFAULT_FAST_SCROLL_ENABLED);
     }
 
     /**
      * Get the fast scroll multiplier.
      */
-    public static int getFastScrollMultiplier(android.content.Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+    public static int getFastScrollMultiplier(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getInt(KEY_FAST_SCROLL_MULTIPLIER, DEFAULT_FAST_SCROLL_MULTIPLIER);
     }
 }

@@ -40,4 +40,11 @@
 
     </LinearLayout>
 
+    <!-- Extra keys row above keyboard -->
+    <com.termux.window.ExtraKeysView
+        android:id="@+id/extra_keys"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#ff1a1a1a" />
+
 </com.termux.window.TermuxFloatView>

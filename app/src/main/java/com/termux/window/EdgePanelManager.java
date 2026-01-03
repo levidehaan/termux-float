@@ -48,6 +48,7 @@ public class EdgePanelManager {
     // State
     private boolean mIsExpanded = false;
     private boolean mIsAnimating = false;
+    private boolean mMainPanelInWindowManager = false;
 
     // Display dimensions
     private int mDisplayWidth;
@@ -106,6 +107,9 @@ public class EdgePanelManager {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+            // Tell the system not to animate this window during rotation
+            // This helps prevent AsyncRotationController crashes
+            params.rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT;
         } else {
             params.type = WindowManager.LayoutParams.TYPE_PHONE;
         }
@@ -135,20 +139,41 @@ public class EdgePanelManager {
     }
 
     /**
+     * Update edge indicator params after display dimension change (rotation).
+     */
+    private void updateEdgeIndicatorParams() {
+        mEdgeIndicatorParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        // Height doesn't need to change, but ensure gravity is correct
+        Logger.logDebug(LOG_TAG, "Edge indicator params updated for new display dimensions");
+    }
+
+    /**
      * Show the edge indicator (when panel is collapsed).
      */
     public void showEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] showEdgeIndicator() called, mEdgeIndicator=" +
+            (mEdgeIndicator != null ? "exists" : "null"));
+
         if (mEdgeIndicator == null) {
             initEdgeIndicator();
+            Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator created");
         }
+
+        // Update params in case display dimensions changed (rotation)
+        updateEdgeIndicatorParams();
 
         if (mEdgeIndicator.getWindowToken() == null) {
             try {
+                Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Adding edge indicator to WindowManager...");
                 mWindowManager.addView(mEdgeIndicator, mEdgeIndicatorParams);
-                Logger.logDebug(LOG_TAG, "Edge indicator shown");
+                Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator added successfully");
             } catch (Exception e) {
+                Logger.logError(LOG_TAG, "[SHOW-" + timestamp + "] Failed to add edge indicator: " + e.getMessage());
                 Logger.logStackTrace(LOG_TAG, e);
             }
+        } else {
+            Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator already has window token, skipping addView");
         }
     }
 
@@ -156,14 +181,37 @@ public class EdgePanelManager {
      * Hide the edge indicator (when panel is expanded).
      */
     public void hideEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] hideEdgeIndicator() called, mEdgeIndicator=" +
+            (mEdgeIndicator != null ? "exists" : "null") +
+            " hasToken=" + (mEdgeIndicator != null && mEdgeIndicator.getWindowToken() != null));
+
         if (mEdgeIndicator != null && mEdgeIndicator.getWindowToken() != null) {
             try {
+                // Clear touch listener and cancel pending input before removing
+                // This prevents "Input channel disposed without being removed" warnings
+                mEdgeIndicator.setOnTouchListener(null);
+                mEdgeIndicator.cancelPendingInputEvents();
+                Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] Removing edge indicator from WindowManager...");
                 mWindowManager.removeView(mEdgeIndicator);
-                Logger.logDebug(LOG_TAG, "Edge indicator hidden");
+                Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] Edge indicator removed successfully");
             } catch (Exception e) {
+                Logger.logError(LOG_TAG, "[HIDE-" + timestamp + "] Failed to remove edge indicator: " + e.getMessage());
                 Logger.logStackTrace(LOG_TAG, e);
             }
         }
+    }
+
+    /**
+     * Destroy the edge indicator completely (for rotation).
+     * This ensures fresh view + touch listener when recreated.
+     */
+    public void destroyEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[DESTROY-" + timestamp + "] destroyEdgeIndicator() called");
+        hideEdgeIndicator();
+        mEdgeIndicator = null;
+        Logger.logDebug(LOG_TAG, "[DESTROY-" + timestamp + "] Edge indicator destroyed, set to null");
     }
 
     /**
@@ -179,8 +227,22 @@ public class EdgePanelManager {
             mStateListener.onPanelExpanding();
         }
 
-        // Hide edge indicator
+        // Hide edge indicator when panel is expanded to prevent Z-order issues
+        // The SwipeMarginView on the left edge of the panel handles close gestures
         hideEdgeIndicator();
+        Logger.logDebug(LOG_TAG, "Edge indicator hidden for panel expansion");
+
+        // Add main panel back to WindowManager if not already there
+        if (!mMainPanelInWindowManager) {
+            try {
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+                mWindowManager.addView(mTermuxFloatView, params);
+                mMainPanelInWindowManager = true;
+                Logger.logDebug(LOG_TAG, "Main panel added to WindowManager");
+            } catch (Exception e) {
+                Logger.logStackTrace(LOG_TAG, e);
+            }
+        }
 
         // Make the main view visible
         mTermuxFloatView.setVisibility(View.VISIBLE);
@@ -271,8 +333,20 @@ public class EdgePanelManager {
             public void onAnimationEnd(Animator animation) {
                 mIsExpanded = false;
                 mIsAnimating = false;
-                // Hide main view and show edge indicator
-                mTermuxFloatView.setVisibility(View.GONE);
+
+                // Remove main panel from WindowManager to prevent rotation crashes
+                // AsyncRotationController can't crash if the panel isn't registered
+                if (mMainPanelInWindowManager) {
+                    try {
+                        mWindowManager.removeView(mTermuxFloatView);
+                        mMainPanelInWindowManager = false;
+                        Logger.logDebug(LOG_TAG, "Main panel removed from WindowManager");
+                    } catch (Exception e) {
+                        Logger.logStackTrace(LOG_TAG, e);
+                    }
+                }
+
+                // Ensure edge indicator is shown (in case it wasn't already)
                 showEdgeIndicator();
                 if (mStateListener != null) {
                     mStateListener.onPanelCollapsed();
@@ -369,19 +443,33 @@ public class EdgePanelManager {
     public void onDisplayChanged() {
         updateDisplayDimensions();
 
-        if (mIsExpanded) {
+        if (mIsExpanded && mTermuxFloatView.isAttachedToWindow()) {
             // Update panel size to match new display
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
             params.width = mDisplayWidth;
             params.height = mDisplayHeight;
-            if (mTermuxFloatView.getWindowToken() != null) {
+            try {
                 mWindowManager.updateViewLayout(mTermuxFloatView, params);
+            } catch (IllegalArgumentException e) {
+                Logger.logWarn(LOG_TAG, "Failed to update layout during rotation: " + e.getMessage());
             }
         }
     }
 
     /**
+     * Cancel any running animations. Called during rotation to prevent crashes.
+     */
+    public void cancelAnimations() {
+        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
+            mSlideAnimator.cancel();
+            mIsAnimating = false;
+            Logger.logDebug(LOG_TAG, "Animations cancelled for rotation");
+        }
+    }
+
+    /**
      * Touch listener for the edge indicator.
+     * Swipe left to toggle panel state (open when closed, close when open).
      */
     private class EdgeIndicatorTouchListener implements View.OnTouchListener {
         private float mStartX;
@@ -410,14 +498,21 @@ public class EdgePanelManager {
                     float totalDeltaX = endX - mStartX;
                     float velocityX = duration > 0 ? (totalDeltaX / duration) * 1000 : 0;
 
-                    // Check for tap (quick touch with minimal movement)
+                    // Check for tap (quick touch with minimal movement) - toggle panel
                     if (duration < 300 && Math.abs(totalDeltaX) < mSwipeThresholdPx / 2) {
-                        expand();
+                        Logger.logDebug(LOG_TAG, "Edge indicator tapped, toggling panel");
+                        toggle();
                         return true;
                     }
 
-                    // Check for swipe
-                    return handleEdgeSwipe(totalDeltaX, velocityX);
+                    // Check for swipe left - toggle panel
+                    if (totalDeltaX < -mSwipeThresholdPx / 2 || velocityX < -SWIPE_VELOCITY_THRESHOLD) {
+                        Logger.logDebug(LOG_TAG, "Edge indicator swiped left, toggling panel");
+                        toggle();
+                        return true;
+                    }
+
+                    return false;
 
                 case MotionEvent.ACTION_CANCEL:
                     return true;
