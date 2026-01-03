@@ -151,8 +151,13 @@ public class EdgePanelManager {
      * Show the edge indicator (when panel is collapsed).
      */
     public void showEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] showEdgeIndicator() called, mEdgeIndicator=" +
+            (mEdgeIndicator != null ? "exists" : "null"));
+
         if (mEdgeIndicator == null) {
             initEdgeIndicator();
+            Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator created");
         }
 
         // Update params in case display dimensions changed (rotation)
@@ -160,11 +165,15 @@ public class EdgePanelManager {
 
         if (mEdgeIndicator.getWindowToken() == null) {
             try {
+                Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Adding edge indicator to WindowManager...");
                 mWindowManager.addView(mEdgeIndicator, mEdgeIndicatorParams);
-                Logger.logDebug(LOG_TAG, "Edge indicator shown");
+                Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator added successfully");
             } catch (Exception e) {
+                Logger.logError(LOG_TAG, "[SHOW-" + timestamp + "] Failed to add edge indicator: " + e.getMessage());
                 Logger.logStackTrace(LOG_TAG, e);
             }
+        } else {
+            Logger.logDebug(LOG_TAG, "[SHOW-" + timestamp + "] Edge indicator already has window token, skipping addView");
         }
     }
 
@@ -172,15 +181,22 @@ public class EdgePanelManager {
      * Hide the edge indicator (when panel is expanded).
      */
     public void hideEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] hideEdgeIndicator() called, mEdgeIndicator=" +
+            (mEdgeIndicator != null ? "exists" : "null") +
+            " hasToken=" + (mEdgeIndicator != null && mEdgeIndicator.getWindowToken() != null));
+
         if (mEdgeIndicator != null && mEdgeIndicator.getWindowToken() != null) {
             try {
                 // Clear touch listener and cancel pending input before removing
                 // This prevents "Input channel disposed without being removed" warnings
                 mEdgeIndicator.setOnTouchListener(null);
                 mEdgeIndicator.cancelPendingInputEvents();
+                Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] Removing edge indicator from WindowManager...");
                 mWindowManager.removeView(mEdgeIndicator);
-                Logger.logDebug(LOG_TAG, "Edge indicator hidden");
+                Logger.logDebug(LOG_TAG, "[HIDE-" + timestamp + "] Edge indicator removed successfully");
             } catch (Exception e) {
+                Logger.logError(LOG_TAG, "[HIDE-" + timestamp + "] Failed to remove edge indicator: " + e.getMessage());
                 Logger.logStackTrace(LOG_TAG, e);
             }
         }
@@ -191,9 +207,11 @@ public class EdgePanelManager {
      * This ensures fresh view + touch listener when recreated.
      */
     public void destroyEdgeIndicator() {
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[DESTROY-" + timestamp + "] destroyEdgeIndicator() called");
         hideEdgeIndicator();
         mEdgeIndicator = null;
-        Logger.logDebug(LOG_TAG, "Edge indicator destroyed for recreation");
+        Logger.logDebug(LOG_TAG, "[DESTROY-" + timestamp + "] Edge indicator destroyed, set to null");
     }
 
     /**
@@ -209,7 +227,10 @@ public class EdgePanelManager {
             mStateListener.onPanelExpanding();
         }
 
-        // Keep edge indicator visible - it will be used to close too
+        // Hide edge indicator when panel is expanded to prevent Z-order issues
+        // The SwipeMarginView on the left edge of the panel handles close gestures
+        hideEdgeIndicator();
+        Logger.logDebug(LOG_TAG, "Edge indicator hidden for panel expansion");
 
         // Add main panel back to WindowManager if not already there
         if (!mMainPanelInWindowManager) {

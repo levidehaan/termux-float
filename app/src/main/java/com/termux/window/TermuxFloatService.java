@@ -58,7 +58,9 @@ public class TermuxFloatService extends Service implements
     // Rotation detection - uses accelerometer to detect rotation BEFORE system rotation starts
     private OrientationEventListener mOrientationListener;
     private int mLastOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    private int mLastStableOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
     private boolean mRotationInProgress = false;
+    private boolean mEdgeIndicatorPreemptivelyHidden = false;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -87,6 +89,10 @@ public class TermuxFloatService extends Service implements
      * Set up orientation listener using accelerometer to detect rotation early.
      * This fires BEFORE the system rotation animation starts, giving us time to
      * hide overlay windows before AsyncRotationController can crash us.
+     *
+     * AGGRESSIVE STRATEGY: We hide the edge indicator as soon as the phone starts
+     * tilting toward landscape (at 45° threshold), well before the system rotation
+     * actually triggers (usually at 60-70°). This gives us a significant head start.
      */
     private void setupOrientationListener() {
         mOrientationListener = new OrientationEventListener(this) {
@@ -95,34 +101,76 @@ public class TermuxFloatService extends Service implements
                 if (orientation == ORIENTATION_UNKNOWN) return;
                 if (mEdgePanelManager == null) return;
 
-                // Determine if this is a significant orientation change
-                // Use tighter thresholds (30°) to detect rotation EARLIER
-                // Portrait: 0° or 180° (330-30° or 150-210°)
-                // Landscape: 90° or 270° (60-120° or 240-300°)
-                boolean isLandscape = (orientation >= 60 && orientation < 120) ||
-                                      (orientation >= 240 && orientation < 300);
-                boolean wasLandscape = (mLastOrientation >= 60 && mLastOrientation < 120) ||
-                                       (mLastOrientation >= 240 && mLastOrientation < 300);
+                // Use VERY early thresholds to detect BEFORE system rotation
+                // System typically triggers rotation at 60-70°
+                // We hide at 45° to get ahead of AsyncRotationController
+                boolean isTiltingTowardLandscape = (orientation >= 45 && orientation < 135) ||
+                                                   (orientation >= 225 && orientation < 315);
+                boolean wasTiltingTowardLandscape = (mLastOrientation >= 45 && mLastOrientation < 135) ||
+                                                    (mLastOrientation >= 225 && mLastOrientation < 315);
 
-                // Detect transition between portrait and landscape
-                if (mLastOrientation != ORIENTATION_UNKNOWN && isLandscape != wasLandscape) {
-                    if (!mRotationInProgress) {
-                        mRotationInProgress = true;
-                        Logger.logDebug(LOG_TAG, "Rotation detected via accelerometer! Hiding overlays.");
+                // Preemptively hide edge indicator when phone starts tilting toward landscape
+                if (isTiltingTowardLandscape && !wasTiltingTowardLandscape && !mEdgeIndicatorPreemptivelyHidden) {
+                    if (!mEdgePanelManager.isExpanded()) {
+                        mEdgeIndicatorPreemptivelyHidden = true;
+                        long timestamp = System.currentTimeMillis();
+                        Logger.logDebug(LOG_TAG, "[TILT-" + timestamp + "] Phone tilting toward landscape! orientation=" +
+                            orientation + " - preemptively hiding edge indicator");
 
-                        // IMPORTANT: OrientationEventListener callback runs on sensor thread,
-                        // but WindowManager operations MUST run on main thread!
+                        // Hide immediately on main thread
                         mHandler.post(() -> {
+                            long postTimestamp = System.currentTimeMillis();
+                            Logger.logDebug(LOG_TAG, "[TILT-" + timestamp + "] Handler executing after " +
+                                (postTimestamp - timestamp) + "ms, destroying edge indicator...");
                             if (mEdgePanelManager != null) {
                                 mEdgePanelManager.cancelAnimations();
                                 mEdgePanelManager.destroyEdgeIndicator();
-                                Logger.logDebug(LOG_TAG, "Edge indicator destroyed on main thread");
+                                Logger.logDebug(LOG_TAG, "[TILT-" + timestamp + "] Edge indicator destroyed preemptively");
                             }
                         });
+                    }
+                }
+
+                // Determine actual landscape/portrait state (for actual rotation detection)
+                boolean isLandscape = (orientation >= 60 && orientation < 120) ||
+                                      (orientation >= 240 && orientation < 300);
+                boolean isPortrait = (orientation >= 330 || orientation < 30) ||
+                                     (orientation >= 150 && orientation < 210);
+
+                // Track stable orientation for restoring edge indicator
+                if (isLandscape || isPortrait) {
+                    int newStableOrientation = isLandscape ? 90 : 0; // simplified
+                    if (mLastStableOrientation != newStableOrientation) {
+                        mLastStableOrientation = newStableOrientation;
+
+                        if (isPortrait && mEdgeIndicatorPreemptivelyHidden) {
+                            // Back to portrait - can restore edge indicator after delay
+                            long timestamp = System.currentTimeMillis();
+                            Logger.logDebug(LOG_TAG, "[TILT-" + timestamp + "] Back to portrait, will restore edge indicator in 800ms");
+                            mHandler.postDelayed(() -> {
+                                if (mEdgePanelManager != null && !mEdgePanelManager.isExpanded() && mEdgeIndicatorPreemptivelyHidden) {
+                                    mEdgeIndicatorPreemptivelyHidden = false;
+                                    Logger.logDebug(LOG_TAG, "[TILT-" + timestamp + "] Restoring edge indicator after portrait detected");
+                                    mEdgePanelManager.showEdgeIndicator();
+                                }
+                            }, 800);
+                        }
+                    }
+                }
+
+                // Also track actual rotation for the flag
+                boolean wasLandscape = (mLastOrientation >= 60 && mLastOrientation < 120) ||
+                                       (mLastOrientation >= 240 && mLastOrientation < 300);
+                if (mLastOrientation != ORIENTATION_UNKNOWN && isLandscape != wasLandscape) {
+                    if (!mRotationInProgress) {
+                        mRotationInProgress = true;
+                        long timestamp = System.currentTimeMillis();
+                        Logger.logDebug(LOG_TAG, "[ROTATION-" + timestamp + "] Actual rotation detected! orientation=" + orientation);
 
                         // Reset rotation flag after system rotation should be complete
                         mHandler.postDelayed(() -> {
                             mRotationInProgress = false;
+                            Logger.logDebug(LOG_TAG, "[ROTATION-" + timestamp + "] Rotation flag reset");
                         }, 1000);
                     }
                 }
@@ -762,34 +810,54 @@ public class TermuxFloatService extends Service implements
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        Logger.logDebug(LOG_TAG, "Configuration changed, orientation: " + newConfig.orientation);
+        long timestamp = System.currentTimeMillis();
+        Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] Configuration changed! orientation=" +
+            (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ? "LANDSCAPE" : "PORTRAIT") +
+            " mRotationInProgress=" + mRotationInProgress);
 
-        if (mEdgePanelManager == null) return;
+        if (mEdgePanelManager == null) {
+            Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] EdgePanelManager is null, skipping");
+            return;
+        }
 
         // Cancel any running animations immediately to prevent rotation crashes
         mEdgePanelManager.cancelAnimations();
+        Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] Animations cancelled");
 
         // Simple approach: destroy edge indicator in landscape, recreate fresh in portrait
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            Logger.logDebug(LOG_TAG, "Landscape mode - destroying edge indicator");
+            Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] LANDSCAPE - destroying edge indicator");
             // Destroy completely so it gets recreated fresh with new touch listener
             mEdgePanelManager.destroyEdgeIndicator();
             // Update display dimensions for when we come back to portrait
             mEdgePanelManager.onDisplayChanged();
+            Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] LANDSCAPE - edge indicator destroyed");
         } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] PORTRAIT - updating dimensions, expanded=" +
+                mEdgePanelManager.isExpanded() + " preemptivelyHidden=" + mEdgeIndicatorPreemptivelyHidden);
             // Update display dimensions first
             mEdgePanelManager.onDisplayChanged();
+            // Reset the preemptive hiding flag since we're now in portrait
+            mEdgeIndicatorPreemptivelyHidden = false;
             // Only show edge indicator if panel is collapsed
             if (!mEdgePanelManager.isExpanded()) {
-                Logger.logDebug(LOG_TAG, "Portrait mode - will show edge indicator after delay");
+                Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] PORTRAIT - scheduling edge indicator show in 600ms");
                 // Longer delay to ensure system rotation animation is fully complete
                 // This prevents AsyncRotationController from grabbing our newly added view
                 mHandler.postDelayed(() -> {
+                    long showTimestamp = System.currentTimeMillis();
+                    Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] PORTRAIT - delayed callback executing after " +
+                        (showTimestamp - timestamp) + "ms, mRotationInProgress=" + mRotationInProgress);
                     if (mEdgePanelManager != null && !mEdgePanelManager.isExpanded() && !mRotationInProgress) {
-                        Logger.logDebug(LOG_TAG, "Portrait mode - showing edge indicator now");
+                        Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] PORTRAIT - showing edge indicator now");
                         mEdgePanelManager.showEdgeIndicator();
+                    } else {
+                        Logger.logDebug(LOG_TAG, "[CONFIG-" + timestamp + "] PORTRAIT - NOT showing edge indicator: " +
+                            "manager=" + (mEdgePanelManager != null) +
+                            " expanded=" + (mEdgePanelManager != null ? mEdgePanelManager.isExpanded() : "N/A") +
+                            " rotationInProgress=" + mRotationInProgress);
                     }
-                }, 500);
+                }, 600);
             }
         }
     }
