@@ -7,6 +7,7 @@ import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.os.Build;
 import android.util.AttributeSet;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -267,6 +268,45 @@ public class TermuxFloatView extends LinearLayout implements EdgeSwipeDetector.E
 
         if (mTermuxFloatSessionClient != null)
             mTermuxFloatSessionClient.onDetachedFromWindow();
+    }
+
+    /**
+     * Called when display dimensions change (e.g., rotation).
+     * Updates cached display dimensions.
+     */
+    public void onDisplayChanged() {
+        Logger.logDebug(LOG_TAG, "onDisplayChanged");
+
+        // Update display dimensions
+        if (mWindowManager != null) {
+            Display display = mWindowManager.getDefaultDisplay();
+            if (display != null) {
+                Point displaySize = new Point();
+                display.getSize(displaySize);
+                DISPLAY_WIDTH = displaySize.x;
+                DISPLAY_HEIGHT = displaySize.y;
+                Logger.logDebug(LOG_TAG, "Display dimensions updated: " + DISPLAY_WIDTH + "x" + DISPLAY_HEIGHT);
+            }
+        }
+
+        // Update swipe thresholds (shouldn't change but recalculate for safety)
+        float density = getContext().getResources().getDisplayMetrics().density;
+        mLeftEdgeZonePx = (int) (LEFT_EDGE_ZONE_DP * density);
+        mSwipeThresholdPx = (int) (SWIPE_THRESHOLD_DP * density);
+    }
+
+    /**
+     * Get current display width.
+     */
+    public int getDisplayWidth() {
+        return DISPLAY_WIDTH;
+    }
+
+    /**
+     * Get current display height.
+     */
+    public int getDisplayHeight() {
+        return DISPLAY_HEIGHT;
     }
 
     @SuppressLint("RtlHardcoded")

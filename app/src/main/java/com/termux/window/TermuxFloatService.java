@@ -7,9 +7,12 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 
@@ -49,6 +52,11 @@ public class TermuxFloatService extends Service implements
     // State
     private boolean mVisibleWindow = true;
     private boolean mIsInitialized = false;
+
+    // Configuration change handling
+    private int mLastOrientation = Configuration.ORIENTATION_UNDEFINED;
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+    private Runnable mConfigChangeRunnable;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -112,6 +120,11 @@ public class TermuxFloatService extends Service implements
         super.onDestroy();
         Logger.logVerbose(LOG_TAG, "onDestroy");
 
+        // Cancel any pending configuration change handling
+        if (mConfigChangeRunnable != null) {
+            mHandler.removeCallbacks(mConfigChangeRunnable);
+        }
+
         if (mMemoryManager != null) {
             mMemoryManager.cleanup();
         }
@@ -135,6 +148,51 @@ public class TermuxFloatService extends Service implements
         }
 
         runStopForeground();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        Logger.logDebug(LOG_TAG, "onConfigurationChanged: orientation=" + newConfig.orientation);
+
+        // Check if orientation actually changed
+        if (newConfig.orientation != mLastOrientation && mLastOrientation != Configuration.ORIENTATION_UNDEFINED) {
+            Logger.logDebug(LOG_TAG, "Orientation changed from " + mLastOrientation + " to " + newConfig.orientation);
+
+            // Cancel any pending config change handling
+            if (mConfigChangeRunnable != null) {
+                mHandler.removeCallbacks(mConfigChangeRunnable);
+            }
+
+            // Debounce the configuration change to avoid rapid updates
+            mConfigChangeRunnable = () -> {
+                handleDisplayChanged();
+                mConfigChangeRunnable = null;
+            };
+            mHandler.postDelayed(mConfigChangeRunnable, 100);
+        }
+        mLastOrientation = newConfig.orientation;
+    }
+
+    /**
+     * Handle display dimension changes (rotation, etc.)
+     */
+    private void handleDisplayChanged() {
+        Logger.logDebug(LOG_TAG, "handleDisplayChanged");
+
+        if (!mIsInitialized) {
+            return;
+        }
+
+        // Update floating window display dimensions
+        if (mFloatingWindow != null) {
+            mFloatingWindow.onDisplayChanged();
+        }
+
+        // Update edge panel manager with new dimensions
+        if (mEdgePanelManager != null) {
+            mEdgePanelManager.onDisplayChanged();
+        }
     }
 
     /**
@@ -289,6 +347,7 @@ public class TermuxFloatService extends Service implements
 
         // Initialize edge panel manager
         mEdgePanelManager = new EdgePanelManager(mFloatingWindow);
+        mFloatingWindow.setEdgePanelManager(mEdgePanelManager);
         mEdgePanelManager.setStateListener(new EdgePanelManager.PanelStateListener() {
             @Override
             public void onPanelExpanding() {
@@ -338,6 +397,10 @@ public class TermuxFloatService extends Service implements
 
         Logger.showToast(this, getString(R.string.panel_instruction_toast), true);
         mIsInitialized = true;
+
+        // Initialize orientation tracking
+        mLastOrientation = getResources().getConfiguration().orientation;
+
         return true;
     }
 

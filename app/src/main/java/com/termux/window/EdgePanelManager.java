@@ -173,6 +173,16 @@ public class EdgePanelManager {
         if (mIsExpanded || mIsAnimating) return;
 
         Logger.logDebug(LOG_TAG, "Expanding panel");
+
+        // Ensure we have fresh display dimensions
+        updateDisplayDimensions();
+
+        // Validate we can proceed
+        if (mTermuxFloatView.getWindowToken() == null) {
+            Logger.logWarn(LOG_TAG, "Cannot expand: no window token");
+            return;
+        }
+
         mIsAnimating = true;
 
         if (mStateListener != null) {
@@ -187,20 +197,33 @@ public class EdgePanelManager {
 
         // Get current layout params
         WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+        if (params == null) {
+            Logger.logWarn(LOG_TAG, "Cannot expand: null layout params");
+            mIsAnimating = false;
+            return;
+        }
+
+        // Capture current display dimensions for animation (they shouldn't change during animation)
+        final int animDisplayWidth = mDisplayWidth;
+        final int animDisplayHeight = mDisplayHeight;
 
         // Set to full screen dimensions
-        final int startX = mDisplayWidth;
+        final int startX = animDisplayWidth;
         final int endX = 0;
 
         params.x = startX;
         params.y = 0;
-        params.width = mDisplayWidth;
-        params.height = mDisplayHeight;
+        params.width = animDisplayWidth;
+        params.height = animDisplayHeight;
         params.gravity = Gravity.TOP | Gravity.START;
 
         // Update layout before animation
-        if (mTermuxFloatView.getWindowToken() != null) {
+        try {
             mWindowManager.updateViewLayout(mTermuxFloatView, params);
+        } catch (IllegalArgumentException e) {
+            Logger.logStackTrace(LOG_TAG, e);
+            mIsAnimating = false;
+            return;
         }
 
         // Animate slide in from right
@@ -210,22 +233,37 @@ public class EdgePanelManager {
 
         final WindowManager.LayoutParams animParams = params;
         mSlideAnimator.addUpdateListener(animation -> {
-            animParams.x = (int) animation.getAnimatedValue();
             if (mTermuxFloatView.getWindowToken() != null) {
-                mWindowManager.updateViewLayout(mTermuxFloatView, animParams);
+                try {
+                    animParams.x = (int) animation.getAnimatedValue();
+                    mWindowManager.updateViewLayout(mTermuxFloatView, animParams);
+                } catch (IllegalArgumentException e) {
+                    // View may have been removed, cancel animation
+                    animation.cancel();
+                }
             }
         });
 
         mSlideAnimator.addListener(new AnimatorListenerAdapter() {
+            private boolean mCancelled = false;
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mCancelled = true;
+                Logger.logDebug(LOG_TAG, "Expand animation cancelled");
+            }
+
             @Override
             public void onAnimationEnd(Animator animation) {
-                mIsExpanded = true;
                 mIsAnimating = false;
-                if (mStateListener != null) {
-                    mStateListener.onPanelExpanded();
+                if (!mCancelled) {
+                    mIsExpanded = true;
+                    if (mStateListener != null) {
+                        mStateListener.onPanelExpanded();
+                    }
+                    // Show keyboard
+                    mTermuxFloatView.showTouchKeyboard();
                 }
-                // Show keyboard
-                mTermuxFloatView.showTouchKeyboard();
             }
         });
 
@@ -239,6 +277,17 @@ public class EdgePanelManager {
         if (!mIsExpanded || mIsAnimating) return;
 
         Logger.logDebug(LOG_TAG, "Collapsing panel");
+
+        // Ensure we have fresh display dimensions
+        updateDisplayDimensions();
+
+        // Validate we can proceed
+        if (mTermuxFloatView.getWindowToken() == null) {
+            Logger.logWarn(LOG_TAG, "Cannot collapse with animation: no window token, using force collapse");
+            forceCollapse();
+            return;
+        }
+
         mIsAnimating = true;
 
         if (mStateListener != null) {
@@ -249,9 +298,17 @@ public class EdgePanelManager {
         mTermuxFloatView.hideTouchKeyboard();
 
         WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+        if (params == null) {
+            Logger.logWarn(LOG_TAG, "Cannot collapse: null layout params");
+            mIsAnimating = false;
+            return;
+        }
+
+        // Capture current display dimensions for animation
+        final int animDisplayWidth = mDisplayWidth;
 
         final int startX = 0;
-        final int endX = mDisplayWidth;
+        final int endX = animDisplayWidth;
 
         // Animate slide out to right
         mSlideAnimator = ValueAnimator.ofInt(startX, endX);
@@ -260,22 +317,37 @@ public class EdgePanelManager {
 
         final WindowManager.LayoutParams animParams = params;
         mSlideAnimator.addUpdateListener(animation -> {
-            animParams.x = (int) animation.getAnimatedValue();
             if (mTermuxFloatView.getWindowToken() != null) {
-                mWindowManager.updateViewLayout(mTermuxFloatView, animParams);
+                try {
+                    animParams.x = (int) animation.getAnimatedValue();
+                    mWindowManager.updateViewLayout(mTermuxFloatView, animParams);
+                } catch (IllegalArgumentException e) {
+                    // View may have been removed, cancel animation
+                    animation.cancel();
+                }
             }
         });
 
         mSlideAnimator.addListener(new AnimatorListenerAdapter() {
+            private boolean mCancelled = false;
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mCancelled = true;
+                Logger.logDebug(LOG_TAG, "Collapse animation cancelled");
+            }
+
             @Override
             public void onAnimationEnd(Animator animation) {
-                mIsExpanded = false;
                 mIsAnimating = false;
-                // Hide main view and show edge indicator
-                mTermuxFloatView.setVisibility(View.GONE);
-                showEdgeIndicator();
-                if (mStateListener != null) {
-                    mStateListener.onPanelCollapsed();
+                if (!mCancelled) {
+                    mIsExpanded = false;
+                    // Hide main view and show edge indicator
+                    mTermuxFloatView.setVisibility(View.GONE);
+                    showEdgeIndicator();
+                    if (mStateListener != null) {
+                        mStateListener.onPanelCollapsed();
+                    }
                 }
             }
         });
@@ -356,28 +428,159 @@ public class EdgePanelManager {
      * Clean up resources.
      */
     public void cleanup() {
-        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
-            mSlideAnimator.cancel();
+        Logger.logDebug(LOG_TAG, "cleanup");
+
+        // Cancel any running animation
+        if (mSlideAnimator != null) {
+            if (mSlideAnimator.isRunning()) {
+                mSlideAnimator.cancel();
+            }
+            mSlideAnimator = null;
         }
+
+        mIsAnimating = false;
+
+        // Remove edge indicator
         hideEdgeIndicator();
         mEdgeIndicator = null;
+
+        // Clear listener
+        mStateListener = null;
     }
 
     /**
      * Called when display dimensions change (rotation, etc.)
+     * This is critical for handling rotation properly.
      */
     public void onDisplayChanged() {
+        Logger.logDebug(LOG_TAG, "onDisplayChanged called, isExpanded=" + mIsExpanded + ", isAnimating=" + mIsAnimating);
+
+        // Cancel any running animation to prevent crashes
+        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
+            Logger.logDebug(LOG_TAG, "Cancelling running animation due to display change");
+            mSlideAnimator.cancel();
+            mIsAnimating = false;
+        }
+
+        // Update dimensions
+        int oldWidth = mDisplayWidth;
+        int oldHeight = mDisplayHeight;
         updateDisplayDimensions();
+        Logger.logDebug(LOG_TAG, "Display dimensions changed: " + oldWidth + "x" + oldHeight + " -> " + mDisplayWidth + "x" + mDisplayHeight);
+
+        // Make sure we have a valid window token before updating layout
+        if (mTermuxFloatView.getWindowToken() == null) {
+            Logger.logDebug(LOG_TAG, "No window token, skipping layout update");
+            return;
+        }
 
         if (mIsExpanded) {
-            // Update panel size to match new display
-            WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
-            params.width = mDisplayWidth;
-            params.height = mDisplayHeight;
-            if (mTermuxFloatView.getWindowToken() != null) {
-                mWindowManager.updateViewLayout(mTermuxFloatView, params);
+            // Update panel size to match new display dimensions
+            try {
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+                if (params != null) {
+                    params.x = 0;
+                    params.y = 0;
+                    params.width = mDisplayWidth;
+                    params.height = mDisplayHeight;
+                    params.gravity = Gravity.TOP | Gravity.START;
+                    mWindowManager.updateViewLayout(mTermuxFloatView, params);
+                    Logger.logDebug(LOG_TAG, "Updated expanded panel to: " + mDisplayWidth + "x" + mDisplayHeight);
+                }
+            } catch (IllegalArgumentException e) {
+                Logger.logStackTrace(LOG_TAG, e);
+            }
+        } else {
+            // If collapsed, make sure edge indicator is correctly positioned
+            // The edge indicator uses Gravity.END so it should reposition automatically,
+            // but we may need to re-add it if there were issues
+            if (mEdgeIndicator != null) {
+                try {
+                    // Remove and re-add to ensure proper positioning
+                    if (mEdgeIndicator.getWindowToken() != null) {
+                        mWindowManager.removeView(mEdgeIndicator);
+                    }
+                    mWindowManager.addView(mEdgeIndicator, mEdgeIndicatorParams);
+                    Logger.logDebug(LOG_TAG, "Re-added edge indicator after rotation");
+                } catch (Exception e) {
+                    Logger.logStackTrace(LOG_TAG, e);
+                }
             }
         }
+    }
+
+    /**
+     * Force a safe collapse without animation - useful during rotation recovery.
+     */
+    public void forceCollapse() {
+        Logger.logDebug(LOG_TAG, "Force collapsing panel");
+
+        // Cancel any running animation
+        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
+            mSlideAnimator.cancel();
+        }
+        mIsAnimating = false;
+
+        // Hide keyboard
+        mTermuxFloatView.hideTouchKeyboard();
+
+        // Hide main view
+        mTermuxFloatView.setVisibility(View.GONE);
+
+        // Show edge indicator
+        showEdgeIndicator();
+
+        mIsExpanded = false;
+
+        if (mStateListener != null) {
+            mStateListener.onPanelCollapsed();
+        }
+    }
+
+    /**
+     * Force a safe expand without animation - useful during rotation recovery.
+     */
+    public void forceExpand() {
+        Logger.logDebug(LOG_TAG, "Force expanding panel");
+
+        // Cancel any running animation
+        if (mSlideAnimator != null && mSlideAnimator.isRunning()) {
+            mSlideAnimator.cancel();
+        }
+        mIsAnimating = false;
+
+        // Hide edge indicator
+        hideEdgeIndicator();
+
+        // Update dimensions first
+        updateDisplayDimensions();
+
+        // Set up full screen panel
+        try {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) mTermuxFloatView.getLayoutParams();
+            if (params != null && mTermuxFloatView.getWindowToken() != null) {
+                params.x = 0;
+                params.y = 0;
+                params.width = mDisplayWidth;
+                params.height = mDisplayHeight;
+                params.gravity = Gravity.TOP | Gravity.START;
+                mWindowManager.updateViewLayout(mTermuxFloatView, params);
+            }
+        } catch (IllegalArgumentException e) {
+            Logger.logStackTrace(LOG_TAG, e);
+        }
+
+        // Show main view
+        mTermuxFloatView.setVisibility(View.VISIBLE);
+
+        mIsExpanded = true;
+
+        if (mStateListener != null) {
+            mStateListener.onPanelExpanded();
+        }
+
+        // Show keyboard
+        mTermuxFloatView.showTouchKeyboard();
     }
 
     /**
